@@ -543,7 +543,6 @@
           .then(function (r) {
             var j = r.json || {};
             toast('Добавлено: ' + (j.added || []).length + ((j.failed || []).length ? '; не найдено: ' + j.failed.join(', ') : ''));
-    fetch('/home/admin/session', { credentials: 'include', cache: 'no-store' }).then(function () { load(); }).catch(function () { load(); });
           });
       } });
       api('/yt/subs?profile=' + encodeURIComponent(p.name)).then(function (r) {
