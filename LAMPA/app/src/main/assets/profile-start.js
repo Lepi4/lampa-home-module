@@ -100,8 +100,27 @@ function init(){
  }
  if(profile.is_child){var originalSet=Lampa.Storage.set;Lampa.Storage.set=function(k,v){if(k==='source')v='tmdb';return originalSet.call(this,k,v);};Lampa.Storage.set('source','tmdb');}
 
- var cfg=profile.settings||{}, generation=0, pendingAuto=null, pendingRetry=null, manualUntil=0, autoTimer=null, autoPlaybackPending=false;
- function cancelAuto(){generation++;pendingAuto=null;pendingRetry=null;autoPlaybackPending=false;clearTimeout(autoTimer);}
+ var cfg=profile.settings||{}, generation=0, pendingAuto=null, pendingRetry=null, manualUntil=0, autoTimer=null, autoPlaybackPending=false, torrentProgressUi=null, torrentProgressTimer=null;
+ function torrentProgressStyle(){
+  if(typeof document==='undefined'||document.getElementById('home-torrent-progress-style'))return;
+  var style=document.createElement('style');style.id='home-torrent-progress-style';style.textContent='.home-torrent-progress{position:fixed;left:50%;bottom:7.5%;transform:translateX(-50%);z-index:2147483000;width:min(560px,82vw);padding:16px 20px 14px;border-radius:12px;background:rgba(18,20,25,.96);box-shadow:0 5px 28px rgba(0,0,0,.5);color:#fff;font:500 16px/1.35 sans-serif;pointer-events:none}.home-torrent-progress__row{display:flex;align-items:center;gap:11px}.home-torrent-progress__spinner{width:17px;height:17px;border:2px solid rgba(255,255,255,.28);border-top-color:#fff;border-radius:50%;animation:home-torrent-spin .8s linear infinite;flex:none}.home-torrent-progress__detail{margin-top:7px;color:rgba(255,255,255,.72);font-size:13px}.home-torrent-progress__track{height:4px;margin-top:12px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,.18)}.home-torrent-progress__bar{height:100%;width:38%;border-radius:4px;background:#4da3ff;animation:home-torrent-slide 1.25s ease-in-out infinite}@keyframes home-torrent-spin{to{transform:rotate(360deg)}}@keyframes home-torrent-slide{0%{transform:translateX(-150%)}50%{transform:translateX(90%)}100%{transform:translateX(270%)}}';document.head&&document.head.appendChild(style);
+ }
+ function torrentProgress(label,detail){
+  if(typeof document==='undefined'||!document.body)return;
+  torrentProgressStyle();
+  if(!torrentProgressUi){torrentProgressUi=document.createElement('div');torrentProgressUi.className='home-torrent-progress';torrentProgressUi.setAttribute('role','status');torrentProgressUi.innerHTML='<div class="home-torrent-progress__row"><span class="home-torrent-progress__spinner"></span><span class="home-torrent-progress__label"></span></div><div class="home-torrent-progress__detail"></div><div class="home-torrent-progress__track"><div class="home-torrent-progress__bar"></div></div>';document.body.appendChild(torrentProgressUi);}
+  torrentProgressUi.querySelector('.home-torrent-progress__label').textContent=label||'';
+  torrentProgressUi.querySelector('.home-torrent-progress__detail').textContent=detail||'';
+  torrentProgressUi.hidden=false;
+ }
+ function torrentProgressHide(){clearTimeout(torrentProgressTimer);torrentProgressTimer=null;if(torrentProgressUi){torrentProgressUi.hidden=true;}}
+ function torrentStartWithProgress(release,movie,label,detail){
+  torrentProgress(label||'Загружаю торрент…',detail||'Получаю список файлов из TorrServer');
+  clearTimeout(torrentProgressTimer);torrentProgressTimer=setTimeout(torrentProgressHide,45000);
+  var start=Lampa.Torrent.start&&Lampa.Torrent.start.__homeOriginal||Lampa.Torrent.start;
+  return start.call(Lampa.Torrent,release,movie);
+ }
+ function cancelAuto(){generation++;pendingAuto=null;pendingRetry=null;autoPlaybackPending=false;clearTimeout(autoTimer);torrentProgressHide();}
  Lampa.Activity.listener.follow('popstate',cancelAuto);Lampa.Listener.follow('activity',function(e){if(e.type==='init')cancelAuto();});
  if(Lampa.Player&&Lampa.Player.play){var originalPlay=Lampa.Player.play;
    Lampa.Player.play=function(data){
@@ -143,13 +162,15 @@ function init(){
    var movie=object.movie;if(!movie||!Lampa.Parser||!Lampa.Torserver)return manual(object);var own=++generation,active=Lampa.Activity.active();
    function fallback(){if(own!==generation||Lampa.Activity.active()!==active)return;manual(object);}
    clearTimeout(autoTimer);autoTimer=setTimeout(fallback,35000);
-   Lampa.Noty.show('Выбираю раздачу…');
+   torrentProgress('Ищу подходящую раздачу…','Проверяю подключение к TorrServer');
    chooseTarget(movie,function(target){if(own!==generation||Lampa.Activity.active()!==active)return;if(target===false)return fallback();
+     torrentProgress('Ищу подходящую раздачу…','Получаю результаты поиска');
      Lampa.Parser.get(object,function(data){var candidates=(data.Results||[]).filter(function(e){return eligible(e)&&sameTitle(e,movie,target);});candidates.sort(function(a,b){return resolution(b)-resolution(a)||+(b.Size||0)-+(a.Size||0);});if(!candidates.length){Lampa.Noty.show('Подходящих раздач нет — ручной выбор');return fallback();}
        // Bound metadata work: compare the actual episode files of the eight largest eligible releases.
        var counts={},pool=candidates.filter(function(e){var h=resolution(e);counts[h]=(counts[h]||0)+1;return counts[h]<=2;}).slice(0,8),best=null,spare=null,deadline=Date.now()+35000;
        function consider(release,file){var size=+(file.length||file.size||0),key=release.MagnetUri||release.Link||release.Title,item={release:release,file:file,size:size,key:key,height:resolution(release)};if(!best||item.height>best.height||(item.height===best.height&&size>best.size)){if(best&&best.key!==key)spare=best;best=item;}else if(key!==best.key&&(!spare||size>spare.size))spare=item;}
-       function next(){if(own!==generation||Lampa.Activity.active()!==active)return;if(!pool.length||Date.now()>deadline){if(!best){Lampa.Noty.show('Не удалось проверить файлы — ручной выбор');return fallback();}clearTimeout(autoTimer);pendingAuto={path:best.file.path,movie:movie};pendingRetry={attempt:Date.now()+':'+own+':'+Math.random().toString(36).slice(2),release:spare&&spare.release,file:spare&&spare.file,movie:movie,object:object,at:Date.now(),used:false};Lampa.Torrent.start(best.release,movie);return;}
+       function next(){if(own!==generation||Lampa.Activity.active()!==active)return;if(!pool.length||Date.now()>deadline){if(!best){Lampa.Noty.show('Не удалось проверить файлы — ручной выбор');return fallback();}clearTimeout(autoTimer);pendingAuto={path:best.file.path,movie:movie};pendingRetry={attempt:Date.now()+':'+own+':'+Math.random().toString(36).slice(2),release:spare&&spare.release,file:spare&&spare.file,movie:movie,object:object,at:Date.now(),used:false};torrentStartWithProgress(best.release,movie,'Запускаю выбранную раздачу…','Открываю список файлов');return;}
+         torrentProgress('Проверяю файлы раздач…','Осталось проверить '+pool.length+' из '+candidates.length);
          var release=pool.shift();Lampa.Torserver.hash({title:release.Title,link:release.MagnetUri||release.Link,poster:movie.poster_path,data:{lampa:true,movie:movie}},function(result){var attempts=0;
            function files(){if(own!==generation||Lampa.Activity.active()!==active)return;Lampa.Torserver.files(result.hash,function(d){if(d.file_stats){var list=videoFiles(d.file_stats,movie,target);list.forEach(function(f){consider(release,f);});next();}else if(++attempts<6&&Date.now()<deadline)setTimeout(files,750);else next();},next);}files();
          },next);
@@ -158,8 +179,9 @@ function init(){
      },function(){fallback();});
    });return;
  };
- window.__homeTorrentRetry=function(result){var job=pendingRetry;if(!job||!result||result.attempt!==job.attempt||result.profile!==profile.id)return;if(!result.startupFailed){pendingRetry=null;return;}if(job.used||Date.now()-job.at>20000||!job.release){pendingRetry=null;Lampa.Noty.show('Не запустилось — ручной выбор');return manual(job.object);}job.used=true;job.at=Date.now();Lampa.Noty.show('Пробую другую раздачу…');pendingAuto={path:job.file.path,movie:job.movie};Lampa.Torrent.start(job.release,job.movie);};
- Lampa.Listener.follow('torrent_file',function(e){if(e.type==='render'&&pendingAuto&&e.element.path===pendingAuto.path){pendingAuto=null;autoPlaybackPending=true;setTimeout(function(){e.item.trigger('hover:enter');},0);}if(e.type==='list_close')pendingAuto=null;});
+ window.__homeTorrentRetry=function(result){var job=pendingRetry;if(!job||!result||result.attempt!==job.attempt||result.profile!==profile.id)return;if(!result.startupFailed){pendingRetry=null;torrentProgressHide();return;}if(job.used||Date.now()-job.at>20000||!job.release){pendingRetry=null;Lampa.Noty.show('Не запустилось — ручной выбор');return manual(job.object);}job.used=true;job.at=Date.now();Lampa.Noty.show('Пробую другую раздачу…');torrentProgress('Пробую другую раздачу…','Перезапускаю проверку файла');pendingAuto={path:job.file.path,movie:job.movie};torrentStartWithProgress(job.release,job.movie);};
+ Lampa.Listener.follow('torrent_file',function(e){if(e.type==='render'&&!pendingAuto)torrentProgressHide();if(e.type==='render'&&pendingAuto&&e.element.path===pendingAuto.path){pendingAuto=null;autoPlaybackPending=true;torrentProgress('Открываю выбранный файл…','Запускаю плеер');setTimeout(function(){torrentProgressHide();e.item.trigger('hover:enter');},0);}if(e.type==='list_close'){pendingAuto=null;torrentProgressHide();}});
+ if(Lampa.Torrent&&Lampa.Torrent.start&&!Lampa.Torrent.start.__homeProgress){var originalTorrentStart=Lampa.Torrent.start;Lampa.Torrent.start=function(release,movie){return torrentStartWithProgress(release,movie);};Lampa.Torrent.start.__homeProgress=true;Lampa.Torrent.start.__homeOriginal=originalTorrentStart;}
  Lampa.Listener.follow('full',function(e){if(e.type!=='complite')return;
    var movie=e.data&&e.data.movie;if(movie&&movie.id)$.getJSON(owner.server_base+'/home/content-kind?media='+(movie.name?'tv':'movie')+'&id='+movie.id,function(d){if(d.kind)movie.home_kind=d.kind;});
    try{var render=e.object.activity.render();render.find('.view--torrent').off('hover:long.homeProfiles').on('hover:long.homeProfiles',function(){manualUntil=Date.now()+3000;$(this).trigger('hover:enter');return false;});}catch(x){}});
