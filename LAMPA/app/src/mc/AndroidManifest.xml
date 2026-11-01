@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <receiver android:name=".shell.ServerUpdateCleanupReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
+        </receiver>
+        <!-- у Media Center свой домашний экран; прежний алиас Lampa Home не нужен -->
+        <activity-alias
+            android:name=".HomeLauncher"
+            tools:node="remove" />
+
+        <!-- у Media Center одно окно: MainActivity с Lampa и оболочкой поверх неё; она же главный экран (HOME) и значок запуска -->
+        <activity
+            android:name=".MainActivity"
+            android:launchMode="singleTask"
+            tools:replace="android:launchMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

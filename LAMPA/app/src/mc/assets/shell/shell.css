@@ -1,0 +1,131 @@
+/* Lampa Media Center — оболочка домашнего экрана. Размеры в rem: 1rem = 1/96 ширины экрана, поэтому вёрстка одинакова на любом ТВ */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{font-size:1.04vw;background:#000}
+body{margin:0;height:100vh;overflow:hidden;color:#fff;font-family:Roboto,Arial,sans-serif;background:#05080f}
+#bg{position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(120% 90% at 20% 0%,#16324f 0%,#0a1220 45%,#05080f 100%)}
+#bg.img{background-size:cover;background-position:center}
+#app{position:relative;height:100vh;display:flex;flex-direction:column}
+#top{display:flex;align-items:center;gap:2rem;padding:1.4rem 3rem .6rem;flex:none}
+#brand{font-size:1.9rem;font-weight:700;letter-spacing:.02em;color:#f9a825}
+#bar{display:flex;gap:.8rem;flex:1}
+#clock{font-size:2.2rem;font-weight:500}
+#sub{font-size:1.3rem;padding:.35rem .9rem;border-radius:1rem;background:rgba(255,255,255,.12);display:none}
+#sub.low{background:#c62828;color:#fff}
+#scroll{flex:1;overflow:hidden;position:relative}
+#scroll>div{transition:transform .22s ease}
+.row{padding:0 3rem;margin:1rem 0 0}
+.row h2{margin:0 0 .5rem;font-size:1.5rem;font-weight:500;opacity:.9}
+.strip{display:flex;gap:1rem;overflow:hidden;padding:.35rem .2rem .55rem;white-space:nowrap;scroll-behavior:auto}
+.btn{padding:.55rem 1.3rem;border-radius:.6rem;background:rgba(255,255,255,.1);font-size:1.3rem;white-space:nowrap}
+.app{width:7.6rem;flex:none;text-align:center;border-radius:.8rem;padding:.4rem .2rem .3rem;background:rgba(255,255,255,.06)}
+.app img{width:5rem;height:5rem;border-radius:1rem;display:block;margin:0 auto .25rem;background:#222}
+.app span{display:block;font-size:1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card{position:relative;flex:none;border-radius:.7rem;overflow:hidden;background:#161b26}
+.card.poster{width:11.4rem;height:17rem}
+.card.wide{width:20rem;height:11.2rem}
+.card img{width:100%;height:100%;object-fit:cover;display:block}
+.card .ttl{position:absolute;left:0;right:0;bottom:0;padding:1.4rem .6rem 2.1rem;font-size:1.05rem;line-height:1.2;background:linear-gradient(transparent,rgba(0,0,0,.88));white-space:normal;max-height:4.6rem;overflow:hidden}
+.card .bdg{position:absolute;left:.4rem;bottom:.4rem;z-index:2;padding:.1rem .45rem;border-radius:.3rem;background:#f9a825;color:#000;font-size:.95rem;font-weight:700}
+.card .rt{position:absolute;right:.4rem;bottom:.4rem;z-index:2;padding:.1rem .45rem;border-radius:.3rem;background:rgba(0,0,0,.7);font-size:.95rem}
+.card .dt{position:absolute;left:.4rem;top:.4rem;padding:.1rem .5rem;border-radius:.3rem;background:rgba(0,0,0,.72);font-size:.95rem;font-weight:600}
+.card .dur{position:absolute;left:.4rem;bottom:2.8rem;padding:.05rem .4rem;border-radius:.3rem;background:rgba(0,0,0,.72);font-size:.9rem}
+.focus{outline:.2rem solid #fff;outline-offset:.1rem;z-index:2;box-shadow:0 0 1.2rem rgba(255,255,255,.35)}
+.btn.focus,.app.focus{background:#fff;color:#000}
+.empty{opacity:.55;font-size:1.2rem;padding:.4rem 0}
+.hidden{display:none !important}
+#setup{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(5,8,15,.97);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.2rem;z-index:20}
+#setup h1{margin:0;font-size:2.6rem}
+#setup p{margin:0;font-size:1.4rem;opacity:.8;text-align:center;max-width:60rem}
+#setup .list{display:flex;flex-wrap:wrap;gap:1rem;justify-content:center;max-width:70rem}
+#setup .tile{padding:1rem 1.6rem;border-radius:.8rem;background:rgba(255,255,255,.1);font-size:1.4rem;min-width:16rem;text-align:center}
+#setup .tile small{display:block;opacity:.7;font-size:1rem;margin-top:.3rem}
+#setup .tile.focus{background:#fff;color:#000}
+#setup input{font-size:1.5rem;padding:.7rem 1rem;border-radius:.6rem;border:.15rem solid #555;background:#111;color:#fff;width:30rem}
+#setup input:focus{border-color:#f9a825;outline:none}
+#toast{position:fixed;left:50%;bottom:2rem;transform:translateX(-50%);background:rgba(0,0,0,.85);padding:.7rem 1.4rem;border-radius:.6rem;font-size:1.3rem;opacity:0;transition:opacity .2s;z-index:30;pointer-events:none}
+#toast.on{opacity:1}
+
+.card .tvl{position:absolute;left:.4rem;top:.4rem;padding:.1rem .5rem;border-radius:.3rem;background:#c62828;color:#fff;font-size:.95rem;font-weight:700;z-index:2}
+.card .kpb{position:absolute;right:.4rem;top:.4rem;padding:.1rem .5rem;border-radius:.3rem;background:#f9a825;color:#111;font-size:.95rem;font-weight:800;z-index:2}
+.card.wide .dt{top:.4rem}
+.app.sys .glyph{width:5rem;height:5rem;border-radius:1rem;margin:0 auto .25rem;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-size:2.6rem}
+.app.sys.focus .glyph{background:rgba(0,0,0,.12)}
+#setup .picker{max-height:62vh;overflow:auto;gap:.8rem;max-width:84rem}
+#setup .tile.app2{display:flex;align-items:center;gap:.8rem;min-width:19rem;padding:.6rem 1rem;font-size:1.2rem}
+#setup .tile.app2 img{width:3rem;height:3rem;border-radius:.6rem}
+
+#setup .slist{width:72rem;max-height:66vh;overflow:auto;display:flex;flex-direction:column;gap:.5rem;padding:0 .5rem}
+#setup .slist h3{margin:1rem 0 .2rem;font-size:1.3rem;color:#f9a825;font-weight:600;letter-spacing:.04em}
+.srow{display:flex;justify-content:space-between;align-items:center;gap:2rem;padding:.8rem 1.2rem;border-radius:.6rem;background:rgba(255,255,255,.08);font-size:1.4rem}
+.srow .sl small{display:block;opacity:.65;font-size:1rem;margin-top:.2rem}
+.srow .sv{opacity:.9;color:#9ed8ff;text-align:right;max-width:30rem}
+.srow.focus{background:#fff;color:#000}
+.srow.focus .sv{color:#003a66}
+#bg.img{background-size:cover;background-position:center}
+#bg.img::after{content:"";position:absolute;top:0;left:0;right:0;bottom:0;background:linear-gradient(rgba(5,8,15,.35),rgba(5,8,15,.75))}
+
+#setup.searchbox{justify-content:flex-start;padding-top:2.2rem}
+#setup .sline{display:flex;gap:1rem;align-items:center}
+#setup .sline input{width:42rem}
+#setup .sinfo{font-size:1.2rem;opacity:.75}
+#setup .sres{max-height:68vh;overflow:auto;justify-content:flex-start;width:84rem;gap:.9rem}
+#setup .sres .card.poster{width:12.4rem;height:18.4rem}
+
+#info{position:fixed;left:3rem;right:3rem;bottom:.9rem;z-index:6;padding:1rem 1.6rem 1.1rem;border-radius:.9rem;background:linear-gradient(rgba(5,8,15,.78),rgba(5,8,15,.92));border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(2px)}
+#info .it{font-size:2rem;font-weight:700;line-height:1.15}
+#info .io{opacity:.65;font-size:1.2rem;margin-top:.1rem}
+#info .im{margin-top:.35rem;font-size:1.25rem;color:#9ed8ff}
+#info .ig{margin-top:.2rem;font-size:1.15rem;opacity:.85}
+#info .io2{margin-top:.45rem;font-size:1.15rem;line-height:1.35;opacity:.9;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#scroll{padding-bottom:13rem}
+
+/* подпись под постером; пока открыто большое описание — прячется, без описания — у выбранной карточки крупнее и жирнее */
+.card{background:none;border-radius:0;overflow:visible}
+.card.poster{width:11.4rem;height:22.6rem}
+.card.wide{width:20rem;height:16.8rem}
+.card .pic{position:relative;width:100%;border-radius:.7rem;overflow:hidden;background:#161b26}
+.card.poster .pic{height:17rem}
+.card.wide .pic{height:11.2rem}
+.card .ttl{position:static;padding:.5rem .15rem 0;font-size:1.05rem;line-height:1.2;background:none;max-height:4.4rem;overflow:hidden;white-space:normal;text-shadow:0 1px 3px rgba(0,0,0,.8);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;word-break:break-word}
+.card.all .pic{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#232c3f,#151a26);border:.15rem solid rgba(255,255,255,.14);box-sizing:border-box}
+.card.all .allarrow{font-size:5rem;line-height:1;color:#f9a825;font-weight:300}
+.card.all .ttl{text-align:center;color:#f9a825;font-weight:600}
+.card .dur{bottom:.4rem}
+.card.focus{outline:none;box-shadow:none;z-index:2}
+.card.focus .pic{outline:.2rem solid #fff;outline-offset:.1rem;box-shadow:0 0 1.2rem rgba(255,255,255,.35)}
+body:not(.info-on) .card.focus .ttl{font-size:1.35rem;font-weight:700;max-height:5.6rem}
+#setup .sres .card.poster{width:12.4rem;height:22.8rem}
+#setup .sres .card.poster .pic{height:18.4rem}
+#setup .sres .card .ttl{visibility:visible}
+
+#setup .ssec{display:flex;flex-wrap:wrap;gap:.9rem;width:100%}
+#setup .shead{flex:0 0 100%;margin:1rem 0 .1rem;font-size:1.3rem;color:#f9a825;font-weight:600}
+#setup .sres{flex-direction:column;flex-wrap:nowrap;align-items:flex-start}
+#setup .sres .card.wide{width:20rem;height:15.4rem}
+#setup .card.person .tvl{background:#2e7d32}
+#setup .sline input{width:42rem}
+
+#setup .tile.chan{display:flex;align-items:center;gap:.9rem;min-width:24rem;text-align:left;padding:.7rem 1.1rem}
+#setup .tile.chan img{width:4.6rem;height:4.6rem;border-radius:50%;object-fit:cover;background:#222;flex:none}
+#setup .tile.chan .cn{font-size:1.25rem;font-weight:600;max-width:17rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+#setup .sfline{margin-top:.2rem}
+#setup .sfline .tile{min-width:15rem;padding:.6rem 1.1rem;font-size:1.2rem}
+
+#setup .scats{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;width:84rem;margin:.6rem 0 .2rem}
+#setup .scats .tile{min-width:0;padding:.55rem .6rem;font-size:1.15rem}
+#setup .scats .tile.sel{background:#f9a825;color:#111;font-weight:700}
+#setup .scats .tile.sel.focus{background:#fff;color:#000}
+
+#brand,#sub{white-space:nowrap}
+#brand{flex:none}
+#top{gap:.8rem;min-width:0}
+#sub{font-size:1.1rem;flex:none}
+#bar{min-width:0;flex-wrap:nowrap}
+#bar>*{flex:none;font-size:1.15rem;padding:.4rem .85rem;white-space:nowrap}
+#clock{flex:none;margin-left:auto}
+
+.app.moving{outline:.25rem dashed #f9a825;transform:translateY(-.6rem) scale(1.08);box-shadow:0 .8rem 1.6rem rgba(0,0,0,.6);background:#fff;color:#000;transition:transform .12s}
+.card .hist{position:absolute;left:.35rem;bottom:.3rem;padding:.2rem .4rem;border-radius:.25rem;background:rgba(0,0,0,.78);color:#fff;font-size:.85rem}
+#wait{display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.78);align-items:center;justify-content:center;text-align:center;padding:2em;font-size:1.6em;color:#fff;box-sizing:border-box}
+#wait.on{display:flex}

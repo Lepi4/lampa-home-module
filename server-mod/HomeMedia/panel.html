@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lampa Home · сервер</title>
+<style>
+  :root {
+    --bg: #f4f1ea; --card: #ffffff; --ink: #1d1b16; --muted: #6b665a; --line: #e2ddd0;
+    --accent: #c9770a; --accent-ink: #ffffff; --ok: #2f8a4f; --warn: #b7791f; --bad: #b83232; --chip: #efe9da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17150f; --card: #211e16; --ink: #f1ecdf; --muted: #a39d8c; --line: #342f22;
+      --accent: #f0a63a; --accent-ink: #1b1204; --ok: #62c283; --warn: #e0b04a; --bad: #e57373; --chip: #2d2819;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17150f; --card: #211e16; --ink: #f1ecdf; --muted: #a39d8c; --line: #342f22;
+    --accent: #f0a63a; --accent-ink: #1b1204; --ok: #62c283; --warn: #e0b04a; --bad: #e57373; --chip: #2d2819;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 16px max(16px, 4vw); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  main { padding: 18px max(16px, 4vw) 60px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); max-width: 1500px; margin: 0 auto; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; min-width: 0; }
+  section.wide { grid-column: 1 / -1; }
+  h2 { font-size: 15px; margin: 0 0 12px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+  h2 .tag { font-weight: 500; font-size: 12px; color: var(--muted); }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 7px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row .k { color: var(--muted); flex: 0 0 150px; }
+  .row .v { flex: 1 1 180px; min-width: 180px; overflow-wrap: break-word; }
+  .kp, .person { border-top: 1px solid var(--line); padding: 12px 0; }
+  .kp-head, .person .line, .kp-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .kp-head b, .person b { font-size: 15px; }
+  .kp-actions, .person .line + .line { margin-top: 8px; }
+  .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+  .stat { background: var(--chip); border-radius: 10px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 22px; font-weight: 650; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  button, select, input { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 7px 11px; min-height: 36px; }
+  input[type="text"], input[type="password"] { min-width: 0; flex: 1; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .55; cursor: default; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: var(--chip); white-space: nowrap; }
+  .badge.ok { color: var(--ok); } .badge.warn { color: var(--warn); } .badge.bad { color: var(--bad); }
+  .muted { color: var(--muted); }
+  pre { margin: 8px 0 0; padding: 10px 12px; background: var(--chip); border-radius: 9px; font: 12.5px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+  .dev { border-top: 1px solid var(--line); padding: 12px 0; }
+  .dev:first-of-type { border-top: 0; }
+  .dev .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .dev .head b { font-size: 15px; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px 14px; }
+  .opts label { display: grid; gap: 3px; font-size: 12.5px; color: var(--muted); }
+  .opts select { width: 100%; }
+  .walls { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+  .wall { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--chip); }
+  .wall img { width: 100%; height: 84px; object-fit: cover; display: block; }
+  .wall div { padding: 6px 8px; display: flex; gap: 6px; align-items: center; font-size: 12px; }
+  .wall div span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wall button { min-height: 28px; padding: 2px 8px; }
+  .code { font: 650 26px ui-monospace, Consolas, monospace; letter-spacing: .12em; padding: 8px 14px; background: var(--chip); border-radius: 10px; display: inline-block; margin: 6px 0; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; }
+  .toast.show { opacity: .94; }
+  @media (max-width: 560px) { .row .k { min-width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <div style="flex:1;min-width:0"><h1>Lampa Home · сервер</h1><div class="sub" id="clock"></div></div>
+  <a href="/profiles" style="margin:8px">Профили и вход</a>
+  <button id="refresh">Обновить</button>
+</header>
+<main id="main"></main>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  var BASE = '{localhost}'.replace(/\/$/, '');
+  if (BASE.indexOf('{') === 0) BASE = location.origin;
+  var adminToken = '';
+
+  function el(tag, attrs) {
+    var e = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (k === 'class') e.className = attrs[k];
+      else if (k === 'text') e.textContent = attrs[k];
+      else if (k.indexOf('on') === 0) e.addEventListener(k.slice(2), attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    });
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c == null) continue;
+      e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+    return e;
+  }
+  function api(path, opts) {
+    opts = opts || {};
+    var headers = {};
+    Object.keys(opts.headers || {}).forEach(function (k) { headers[k] = opts.headers[k]; });
+    if (adminToken) headers['X-Home-Session'] = adminToken;
+    return fetch(BASE + path, { method: opts.method || 'GET', headers: headers, body: opts.body, credentials: 'include', cache: 'no-store' })
+      .then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { ok: r.ok, status: r.status, json: j, text: t }; }); });
+  }
+  var toastT;
+  function toast(t) {
+    var n = document.getElementById('toast');
+    n.textContent = t; n.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(function () { n.classList.remove('show'); }, 2600);
+  }
+  function ago(ms) {
+    if (!ms) return 'никогда';
+    var s = Math.round((Date.now() - ms) / 1000);
+    if (s < 60) return s + ' с назад';
+    if (s < 3600) return Math.round(s / 60) + ' мин назад';
+    if (s < 86400) return Math.round(s / 3600) + ' ч назад';
+    return Math.round(s / 86400) + ' дн назад';
+  }
+  function fmtBytes(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : Math.round(b / 1024) + ' КБ'; }
+  function sec(title, tag, cls) {
+    var s = el('section', { class: cls || '' }, el('h2', {}, title, tag ? el('span', { class: 'tag', text: tag }) : null));
+    document.getElementById('main').appendChild(s);
+    return s;
+  }
+  function kv(k, v) { return el('div', { class: 'row' }, el('div', { class: 'k', text: k }), el('div', { class: 'v' }, v)); }
+  function badge(text, cls) { return el('span', { class: 'badge ' + (cls || ''), text: text }); }
+
+  // ------------------------------------------------------------------ синхронизация
+  function renderSync(box, st) {
+    var g = el('div', { class: 'grid4' });
+    [['Просмотры', st.timeline], ['Закладки', st.bookmarks], ['Мои фильмы/сериалы', st.watchlist], ['Скрыто', st.hidden], ['Дорожки', st.audio], ['Устройства', st.devices]]
+      .forEach(function (p) { g.appendChild(el('div', { class: 'stat' }, el('b', { text: String(p[1]) }), el('span', { text: p[0] }))); });
+    box.appendChild(g);
+    box.appendChild(kv('База', 'home.db · ' + fmtBytes(st.db_bytes)));
+    box.appendChild(kv('Обмен с Кинопабом', st.bridge_last ? 'последний запуск ' + new Date(st.bridge_last).toLocaleTimeString('ru') : 'ещё не запускался'));
+    var out = el('pre', { text: st.bridge_result || '' });
+    var b1 = el('button', { class: 'primary', text: 'Синхронизировать сейчас', onclick: function () {
+      b1.disabled = true; out.textContent = 'Выполняю…';
+      api('/kp/sync/run').then(function (r) { out.textContent = r.text; b1.disabled = false; toast('Обмен выполнен'); });
+    } });
+    var b2 = el('button', { text: 'Пробный прогон', onclick: function () {
+      out.textContent = 'Проверяю…';
+      api('/kp/sync/run?dry=1').then(function (r) { out.textContent = r.text; });
+    } });
+    box.appendChild(el('div', { class: 'row' }, b1, b2));
+    box.appendChild(out);
+    box.appendChild(el('p', { class: 'muted', style: 'margin:10px 0 0;font-size:13px', text: 'Просмотры, закладки и «Мои фильмы» хранятся здесь, на сервере: устройства только отправляют изменения и забирают чужие. Кинопаб подключается как зеркало: то, что досмотрено у нас, отмечается в нём, и наоборот.' }));
+  }
+
+  // ------------------------------------------------------------------ устройства
+  var SETTINGS = [
+    { k: 'maxh', n: 'Максимальное качество', o: [['', 'решает устройство'], ['0', 'без ограничения (4K)'], ['1080', 'до 1080p'], ['720', 'до 720p']] },
+    { k: 'auto', n: 'При запуске', o: [['', 'решает устройство'], ['1', 'сразу включать ТВ'], ['0', 'главная Lampa']] },
+    { k: 'engine', n: 'Движок эфира', o: [['', 'решает устройство'], ['exo', 'ExoPlayer (штатный)'], ['mpv', 'mpv'], ['mpv_embed', 'mpv (аппаратный, рекомендуется)'], ['mpv_hw', 'mpv hw'], ['mpv_sw', 'mpv программный']] },
+    { k: 'buf', n: 'Буфер эфира', o: [['', 'решает устройство'], ['0', 'без буфера'], ['3', '3 секунды'], ['5', '5 секунд'], ['10', '10 секунд']] },
+    { k: 'afr', n: 'Частота кадров экрана (АФР)', o: [['', 'решает устройство'], ['1', 'включена'], ['0', 'выключена']] },
+    { k: 'font', n: 'Шрифт списка каналов', o: [['', 'решает устройство'], ['0', 'мелкий'], ['1', 'средний'], ['2', 'крупный']] },
+    { k: 'alpha', n: 'Прозрачность списка каналов', o: [['', 'решает устройство'], ['100', '100%'], ['85', '85%'], ['70', '70%'], ['55', '55%'], ['40', '40%']] },
+    { k: 'saver', n: 'Заставка Lampa', o: [['', 'решает устройство'], ['0', 'выключена'], ['1', 'включена']] },
+    { k: 'hidel', n: 'Кнопка «Онлайн» (Lampac) в карточке', o: [['', 'решает устройство'], ['0', 'показана'], ['1', 'скрыта']] },
+    { k: 'kpprof', n: 'Профиль Кинопаба', o: 'kp' },
+    { k: 'wall', n: 'Обои', o: null }
+  ];
+  var walls = [], devList = [];
+  var kpProfiles = [];
+
+  function ageName(p) { return p.is_child ? 'до ' + p.max_age + ' лет' : 'взрослый'; }
+  function renderPeople(box, data, devices) {
+    box.appendChild(el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:13px', text: 'Зритель — отдельный человек со своими просмотрами и закладками. Возрастной ценз ограничивает каталог, поиск и запуск. Привязка к устройству выбирает, кто включится при следующем запуске приложения. Профили Кинопаба ниже — это качество картинки, не люди.' }));
+    var profiles = (data && data.profiles) || [];
+    if (!data || data.error) {
+      box.appendChild(el('p', { text: 'Список зрителей не открылся.' }));
+      box.appendChild(el('a', { href: '/profiles', text: 'Открыть страницу профилей' }));
+      return;
+    }
+    profiles.forEach(function (p) {
+      var card = el('div', { class: 'person' });
+      var age = el('select', { 'aria-label': 'Возрастной ценз' });
+      if (p.id === 'u_default') age.appendChild(el('option', { value: 'adult', text: 'Взрослый' }));
+      else [['adult', 'Взрослый'], ['6', 'Детский, до 6 лет'], ['13', 'Детский, до 13 лет'], ['16', 'Детский, до 16 лет']].forEach(function (o) { age.appendChild(el('option', { value: o[0], text: o[1] })); });
+      age.value = p.is_child ? String(p.max_age) : 'adult';
+      if (p.id === 'u_default') age.disabled = true;
+      age.addEventListener('change', function () {
+        var child = age.value !== 'adult';
+        api('/home/admin/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, name: p.name, is_child: child, max_age: child ? +age.value : 18, settings: p.settings || {} }) })
+          .then(function (r) { toast(r.ok ? 'Возрастной ценз сохранён' : ((r.json && r.json.error) || 'Не удалось сохранить')); if (r.ok) load(); });
+      });
+      var cold = p.id === data.default_profile
+        ? badge('холодный запуск', 'ok')
+        : el('button', { text: 'Холодный запуск для всех', onclick: function () {
+          api('/home/admin/default-profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: p.id }) })
+            .then(function (r) { toast(r.ok ? 'Холодный запуск обновлён' : 'Не удалось'); if (r.ok) load(); });
+        } });
+      card.appendChild(el('div', { class: 'line' }, el('b', { text: p.name }), badge(ageName(p), p.is_child ? 'warn' : 'ok'), el('span', { class: 'muted', text: 'Возрастной ценз' }), age, cold));
+      box.appendChild(card);
+    });
+    var nm = el('input', { type: 'text', placeholder: 'Имя, например «Дети»' });
+    var preset = el('select');
+    [['adult', 'Взрослый'], ['6', 'Детский, до 6 лет'], ['13', 'Детский, до 13 лет'], ['16', 'Детский, до 16 лет']].forEach(function (o) { preset.appendChild(el('option', { value: o[0], text: o[1] })); });
+    preset.value = '6';
+    box.appendChild(el('div', { class: 'person' }, el('div', { class: 'line' }, nm, preset, el('button', { class: 'primary', text: 'Создать зрителя', onclick: function () {
+      var name = nm.value.trim(), child = preset.value !== 'adult';
+      if (name.length < 1) { toast('Введите имя'); return; }
+      api('/home/admin/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, is_child: child, max_age: child ? +preset.value : 18, settings: { torrent_auto: false } }) })
+        .then(function (r) { toast(r.ok ? 'Зритель создан' : 'Не удалось создать'); if (r.ok) load(); });
+    } }))));
+    box.appendChild(el('h2', { style: 'margin-top:16px' }, 'Кто включается на устройстве'));
+    if (!devices.length) box.appendChild(el('p', { class: 'muted', text: 'Устройства появятся после запуска приложения.' }));
+    devices.forEach(function (d) {
+      var sel = el('select');
+      sel.appendChild(el('option', { value: '', text: 'общий холодный запуск' }));
+      profiles.forEach(function (p) { sel.appendChild(el('option', { value: p.id, text: p.name + ' · ' + ageName(p) })); });
+      sel.value = (d.cfg && d.cfg.viewer) || '';
+      if (sel.value !== ((d.cfg && d.cfg.viewer) || '')) sel.appendChild(el('option', { value: String(d.cfg.viewer), text: String(d.cfg.viewer) })), sel.value = String(d.cfg.viewer);
+      sel.addEventListener('change', function () {
+        var url = '/home/dev/set?dev=' + encodeURIComponent(d.id) + '&k=viewer';
+        if (sel.value) url += '&v=' + encodeURIComponent(sel.value);
+        api(url).then(function (r) { toast(r.ok ? 'Привязано. Заработает после перезапуска приложения' : 'Не удалось сохранить'); });
+      });
+      box.appendChild(el('div', { class: 'row' }, el('div', { class: 'k', text: d.name || d.id }), el('div', { class: 'v' }, sel)));
+    });
+  }
+
+  function renderDevices(box, list) {
+    box.appendChild(el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:13px', text: 'Кто смотрит и возрастной ценз задаются в блоке «Зрители». Здесь «Профиль Кинопаба» выбирает только качество картинки на этой приставке.' }));
+    if (!list.length) box.appendChild(el('p', { class: 'muted', text: 'Устройства появятся здесь после первого запуска Lampa Home с новой версией плагина.' }));
+    list.forEach(function (d) {
+      var head = el('div', { class: 'head' }, el('b', { text: d.name || d.id }), el('span', { class: 'muted', text: d.id }), badge('был ' + ago(d.seen), Date.now() - d.seen < 180000 ? 'ok' : ''));
+      if (d.custom_name && d.model) head.appendChild(el('span', { class: 'muted', text: d.model }));
+      head.appendChild(el('button', { text: 'Переименовать', onclick: function () {
+        var name = prompt('Имя устройства (до 80 символов). Пустое поле вернёт название модели:', d.custom_name || d.name || '');
+        if (name === null) return;
+        name = name.trim();
+        if (name.length > 80 || /[\u0000-\u001f\u007f-\u009f]/.test(name)) { toast('Имя: до 80 символов, без управляющих знаков'); return; }
+        api('/home/dev/rename?dev=' + encodeURIComponent(d.id) + '&name=' + encodeURIComponent(name), { method: 'POST' })
+          .then(function (r) { toast(r.ok && r.json && r.json.ok ? 'Имя сохранено' : 'Не удалось сохранить имя'); if (r.ok && r.json && r.json.ok) load(); })
+          .catch(function () { toast('Нет связи с сервером'); });
+      } }));
+      head.appendChild(el('button', { class: 'danger', text: 'Забыть', onclick: function () {
+        if (!confirm('Убрать устройство из списка? Оно появится снова при следующем запуске.')) return;
+        api('/home/dev/forget?dev=' + encodeURIComponent(d.id)).then(function () { toast('Убрано'); load(); });
+      } }));
+      var opts = el('div', { class: 'opts' });
+      SETTINGS.forEach(function (s) {
+        var sel = el('select');
+        var options = s.o === 'kp' ? [['', 'решает устройство']].concat(kpProfiles.map(function (p) { return [p.id, p.label || p.id]; }))
+          : (s.o || [['', 'решает устройство'], ['__none', 'без обоев']].concat(walls.map(function (w) { return [w, w]; })));
+        options.forEach(function (o) { sel.appendChild(el('option', { value: o[0], text: o[1] })); });
+        var cur = d.cfg[s.k];
+        sel.value = cur == null ? '' : (cur === '' ? '__none' : String(cur));
+        if (sel.value !== (cur == null ? '' : (cur === '' ? '__none' : String(cur)))) sel.appendChild(el('option', { value: String(cur), text: String(cur) })), sel.value = String(cur);
+        sel.addEventListener('change', function () {
+          var v = sel.value;
+          var url = '/home/dev/set?dev=' + encodeURIComponent(d.id) + '&k=' + s.k;
+          if (v !== '') url += '&v=' + encodeURIComponent(v === '__none' ? '' : v);
+          api(url).then(function (r) { toast(r.ok ? 'Сохранено · применится на устройстве в течение минуты' : 'Не удалось сохранить'); });
+        });
+        opts.appendChild(el('label', {}, s.n, sel));
+      });
+      box.appendChild(el('div', { class: 'dev' }, head, opts));
+    });
+  }
+
+  // ------------------------------------------------------------------ Кинопаб
+  function renderKino(box, profiles) {
+    box.appendChild(el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:13px', text: 'Это подключения аккаунта Кинопаба и качество. Зрителей и возрастной ценз они не задают.' }));
+    (profiles || []).forEach(function (p) {
+      var used = devList.filter(function (d) { return (d.cfg || {}).kpprof === p.id; }).map(function (d) { return d.name || d.id; });
+      var card = el('div', { class: 'kp' });
+      card.appendChild(el('div', { class: 'kp-head' }, el('b', { text: p.label || p.id }), badge(p.authorized ? 'привязан' : 'не привязан', p.authorized ? 'ok' : 'warn'), el('span', { class: 'muted', text: p.device || '' }), used.length ? el('span', { class: 'muted', text: 'устройства: ' + used.join(', ') }) : null));
+      var actions = el('div', { class: 'kp-actions' });
+      var slot = el('div');
+      var btn = el('button', { class: p.authorized ? '' : 'primary', text: p.authorized ? 'Перепривязать' : 'Привязать', onclick: function () {
+        btn.disabled = true;
+        api('/kp/auth/start?profile=' + encodeURIComponent(p.id), { headers: { 'X-KP-Profile': p.id } }).then(function (r) {
+          btn.disabled = false;
+          if (!r.json || !r.json.user_code) { toast('Не удалось начать привязку'); return; }
+          slot.textContent = '';
+          slot.appendChild(el('div', {}, 'Откройте ', el('b', { text: r.json.verification_uri }), ' на телефоне или компьютере и введите код:'));
+          slot.appendChild(el('div', { class: 'code', text: r.json.user_code }));
+          var status = el('div', { class: 'muted', text: 'Жду подтверждения…' });
+          slot.appendChild(status);
+          var iv = Math.max(3, r.json.interval || 5) * 1000, t0 = Date.now();
+          (function poll() {
+            if (Date.now() - t0 > (r.json.expires_in || 300) * 1000) { status.textContent = 'Время вышло, начните заново'; return; }
+            api('/kp/auth/poll?profile=' + encodeURIComponent(p.id), { headers: { 'X-KP-Profile': p.id } }).then(function (x) {
+              var s = x.json && x.json.status;
+              if (s === 'ok') { toast('Профиль привязан'); load(); }
+              else if (s === 'pending') setTimeout(poll, iv);
+              else status.textContent = 'Не получилось (' + (s || x.status) + '), начните заново';
+            });
+          })();
+        });
+      } });
+      actions.appendChild(btn);
+      if (p.authorized) actions.appendChild(el('button', { class: 'danger', text: 'Отвязать', onclick: function () {
+        if (!confirm('Отвязать профиль «' + (p.label || p.id) + '»?')) return;
+        api('/kp/auth/reset?profile=' + encodeURIComponent(p.id), { headers: { 'X-KP-Profile': p.id } }).then(function () { toast('Отвязан'); load(); });
+      } }));
+      if (p.id !== 'main' && p.id !== 'uhd') actions.appendChild(el('button', { class: 'danger', text: 'Удалить профиль', onclick: function () {
+        if (!confirm('Удалить профиль «' + (p.label || p.id) + '» и отвязать его от аккаунта?')) return;
+        api('/home/kp/profile/delete?profile=' + encodeURIComponent(p.id)).then(function (r) { toast(r.ok ? 'Профиль удалён' : 'Не удалось удалить'); load(); });
+      } }));
+      card.appendChild(actions);
+      card.appendChild(slot);
+      box.appendChild(card);
+    });
+    var nm = el('input', { type: 'text', placeholder: 'название нового профиля, например «Кухня»' });
+    var kd = el('select');
+    [['fhd', '1080p · HEVC'], ['uhd', '4K · HEVC · HDR'], ['uhd_sdr', '4K · HEVC (без HDR)'], ['avc', 'только H.264 (старые приставки)']].forEach(function (o) { kd.appendChild(el('option', { value: o[0], text: o[1] })); });
+    box.appendChild(el('div', { class: 'row' }, nm, kd, el('button', { class: 'primary', text: 'Добавить профиль', onclick: function () {
+      if (nm.value.trim().length < 2) { toast('Введите название'); return; }
+      api('/home/kp/profile/add?label=' + encodeURIComponent(nm.value.trim()) + '&kind=' + kd.value).then(function (r) { toast(r.ok ? 'Профиль добавлен — нажмите «Привязать»' : 'Не удалось добавить'); load(); });
+    } })));
+    box.appendChild(el('p', { class: 'muted', style: 'margin:8px 0 0;font-size:13px', text: 'Профили: «1080p» для FullHD-телевизоров и «4K · HDR» для 4K-приставок; какой применять, выбирается профилем устройства.' }));
+  }
+
+  // ------------------------------------------------------------------ Яндекс.Музыка
+  function renderYm(box, st) {
+    var ok = st && st.authorized;
+    box.appendChild(kv('Состояние', el('span', {}, badge(ok ? 'привязана' : 'не привязана', ok ? 'ok' : 'warn'), ok ? ' ' + (st.login || '') + (st.plus ? ' · Плюс' : '') : '')));
+    var q = el('select');
+    [['lossless', 'без потерь (FLAC)'], ['hq', 'высокое (320 кбит/с)'], ['nq', 'обычное']].forEach(function (o) { q.appendChild(el('option', { value: o[0], text: o[1] })); });
+    q.value = (st && st.quality) || 'lossless';
+    q.addEventListener('change', function () { api('/ym/quality?q=' + q.value).then(function () { toast('Качество сохранено'); }); });
+    box.appendChild(kv('Качество', q));
+    var slot = el('div');
+    var bind = el('button', { class: ok ? '' : 'primary', text: ok ? 'Перепривязать' : 'Привязать по коду', onclick: function () {
+      api('/ym/auth/start').then(function (r) {
+        if (!r.json || !r.json.user_code) { toast('Не удалось начать привязку'); return; }
+        slot.textContent = '';
+        slot.appendChild(el('div', {}, 'Откройте ', el('b', { text: r.json.verification_url }), ' и введите код:'));
+        slot.appendChild(el('div', { class: 'code', text: r.json.user_code }));
+        var status = el('div', { class: 'muted', text: 'Жду подтверждения…' });
+        slot.appendChild(status);
+        var t0 = Date.now();
+        (function poll() {
+          if (Date.now() - t0 > (r.json.expires_in || 300) * 1000) { status.textContent = 'Время вышло, начните заново'; return; }
+          api('/ym/auth/poll').then(function (x) {
+            var s = x.json && x.json.state;
+            if (s === 'ok' || s === 'done' || (x.json && x.json.authorized)) { toast('Яндекс.Музыка привязана'); load(); }
+            else if (s === 'expired' || s === 'none') status.textContent = 'Время вышло, начните заново';
+            else setTimeout(poll, 5000);
+          });
+        })();
+      });
+    } });
+    box.appendChild(el('div', { class: 'row' }, bind, ok ? el('button', { class: 'danger', text: 'Отвязать', onclick: function () {
+      if (!confirm('Отвязать Яндекс.Музыку?')) return;
+      api('/ym/auth/reset').then(function () { toast('Отвязана'); load(); });
+    } }) : null));
+    box.appendChild(slot);
+    var tok = el('input', { type: 'password', placeholder: 'или вставьте токен вручную' });
+    box.appendChild(el('div', { class: 'row' }, tok, el('button', { text: 'Сохранить токен', onclick: function () {
+      if (!tok.value.trim()) return;
+      api('/ym/auth/token?token=' + encodeURIComponent(tok.value.trim()), { method: 'POST' }).then(function (r) { toast(r.ok ? 'Токен сохранён' : 'Токен не принят'); tok.value = ''; load(); });
+    } })));
+  }
+
+  // ------------------------------------------------------------------ локальная библиотека
+  function renderLocal(box, cfg, st) {
+    var stBy = {}; ((st && st.sources) || []).forEach(function (s) { stBy[s.id] = s; });
+    ((cfg && cfg.sources) || []).forEach(function (s) {
+      var info = stBy[s.id] || {};
+      var top = el('div', { class: 'row' }, el('div', { class: 'k', text: s.title || s.id }),
+        el('div', { class: 'v' }, badge(info.state === 'ok' ? 'работает · ' + (info.count != null ? info.count : '') : (info.state || '—'), info.state === 'ok' ? 'ok' : 'warn'), ' ', el('span', { class: 'muted', text: s.type === 'plex' ? (s.url || '') : (s.path || '') })));
+      var en = el('input', { type: 'checkbox' }); en.checked = !!s.enable;
+      en.addEventListener('change', function () {
+        api('/local/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.id, patch: { enable: en.checked } }) }).then(function () { toast('Сохранено'); });
+      });
+      top.appendChild(el('label', { style: 'display:flex;gap:6px;align-items:center' }, en, 'включено'));
+      box.appendChild(top);
+      if (s.type === 'plex') {
+        var url = el('input', { type: 'text', value: s.url || '', placeholder: 'http://адрес:32400' });
+        var tk = el('input', { type: 'password', placeholder: s.has_token ? 'токен задан — вставьте новый, чтобы заменить' : 'токен Plex' });
+        box.appendChild(el('div', { class: 'row' }, url, tk, el('button', { text: 'Сохранить', onclick: function () {
+          var patch = { url: url.value.trim() };
+          if (tk.value.trim()) patch.token = tk.value.trim();
+          api('/local/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.id, patch: patch }) }).then(function () { toast('Сохранено, индекс обновляется'); tk.value = ''; load(); });
+        } })));
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------ ТВ
+  function renderTv(box, st, cfg) {
+    box.appendChild(kv('Channel Manager', el('span', {}, badge(st && st.ok ? 'доступен' : 'нет связи', st && st.ok ? 'ok' : 'bad'), ' ', st && st.ok ? (st.channels + ' каналов · программа для ' + st.epg_channels) : (st && st.error) || '')));
+    var url = el('input', { type: 'text', value: (cfg && cfg.url) || '', placeholder: 'http://адрес:3002' });
+    box.appendChild(el('div', { class: 'row' }, url, el('button', { text: 'Сохранить адрес', onclick: function () {
+      api('/tv/config/set?url=' + encodeURIComponent(url.value.trim())).then(function (r) { toast(r.json && r.json.ok ? 'Подключено: ' + r.json.channels + ' каналов' : 'Не удалось подключиться'); load(); });
+    } })));
+    var keep = el('select');
+    [[0, 'выключено'], [10, '10 минут после просмотра'], [30, '30 минут'], [60, '1 час'], [180, '3 часа'], [-1, 'всегда']].forEach(function (o) { keep.appendChild(el('option', { value: String(o[0]), text: o[1] })); });
+    keep.value = String((cfg && cfg.keep_min) != null ? cfg.keep_min : 0);
+    keep.addEventListener('change', function () { api('/tv/keep?min=' + keep.value).then(function () { toast('Сохранено'); }); });
+    box.appendChild(kv('Последний канал наготове', keep));
+    box.appendChild(el('div', { class: 'row' }, el('button', { text: 'Обновить программу передач', onclick: function () { api('/tv/refresh').then(function () { toast('Обновление запущено'); }); } })));
+  }
+
+  // ------------------------------------------------------------------ аниме
+  function renderAnime(box, st) {
+    ((st && st.sources) || []).forEach(function (s) {
+      box.appendChild(kv(s.name, el('span', {}, badge(s.state, s.enabled ? 'ok' : (s.state === 'нужен токен' ? 'warn' : 'bad')), ' ', el('span', { class: 'muted', text: s.note }))));
+    });
+    var tkA = el('input', { type: 'password', placeholder: 'AnimeLib: access-токен' });
+    var tkR = el('input', { type: 'password', placeholder: 'refresh-токен (если есть)' });
+    box.appendChild(el('div', { class: 'row' }, tkA, tkR, el('button', { text: 'Сохранить токен AnimeLib', onclick: function () {
+      if (!tkA.value.trim()) { toast('Вставьте access-токен'); return; }
+      api('/home/animelib/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access: tkA.value, refresh: tkR.value }) })
+        .then(function (r) { toast(r.ok ? 'Токен AnimeLib сохранён' : 'Токен не принят'); tkA.value = ''; tkR.value = ''; load(); });
+    } }), el('button', { class: 'danger', text: 'Удалить токен', onclick: function () {
+      api('/home/animelib/forget').then(function () { toast('Токен удалён'); load(); });
+    } })));
+    box.appendChild(kv('Фильтр качества', 'не ниже ' + ((st && st.min_height) || 1080) + 'p: серии и релизы без такого потока не показываются'));
+    box.appendChild(el('div', { class: 'row' }, el('button', { text: 'Сбросить кеш сопоставления', onclick: function () { api('/anime/cache/clear').then(function () { toast('Кеш сброшен'); }); } })));
+  }
+
+  // ------------------------------------------------------------------ обои
+  // поставить обои (name = '' — снять) на одно устройство или на все: устройство подхватывает настройку в течение минуты
+  function applyWall(name, devId) {
+    var targets = devId === '*' ? devList.map(function (d) { return d.id; }) : [devId];
+    if (!targets.length) { toast('Устройств пока нет'); return; }
+    Promise.all(targets.map(function (id) {
+      return api('/home/dev/set?dev=' + encodeURIComponent(id) + '&k=wall&v=' + encodeURIComponent(name));
+    })).then(function () { toast((name ? 'Обои применены' : 'Обои сняты') + ' · устройство подхватит в течение минуты'); load(); });
+  }
+
+  function renderWalls(box) {
+    var grid = el('div', { class: 'walls' });
+    var who = el('select');
+    who.appendChild(el('option', { value: '*', text: 'на все устройства' }));
+    devList.forEach(function (d) { who.appendChild(el('option', { value: d.id, text: d.name || d.id })); });
+    box.appendChild(el('div', { class: 'row' }, el('span', { class: 'muted', text: 'Выберите, куда ставить обои, и нажмите «Применить» под картинкой:' }), who,
+      el('button', { text: 'Снять обои', onclick: function () { applyWall('', who.value); } })));
+    walls.forEach(function (w) {
+      var users = devList.filter(function (d) { return d.cfg && d.cfg.wall === w; }).map(function (d) { return d.name || d.id; });
+      grid.appendChild(el('div', { class: 'wall' }, el('img', { src: BASE + '/home/wallpaper?name=' + encodeURIComponent(w), alt: w, loading: 'lazy' }),
+        users.length ? el('div', { class: 'muted', style: 'font-size:12px', text: 'сейчас: ' + users.join(', ') }) : null,
+        el('div', {}, el('button', { class: 'primary', text: 'Применить', onclick: function () { applyWall(w, who.value); } }),
+          el('span', { text: w }), el('button', { class: 'danger', text: '✕', title: 'Удалить', onclick: function () {
+          if (!confirm('Удалить «' + w + '»?')) return;
+          api('/home/wallpaper/delete?name=' + encodeURIComponent(w), { method: 'POST' }).then(function () { toast('Удалено'); load(); });
+        } }))));
+    });
+    if (!walls.length) box.appendChild(el('p', { class: 'muted', text: 'Обоев пока нет. Загрузите картинку (JPG, PNG, WebP, до 12 МБ).' }));
+    var f = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', multiple: 'multiple' });
+    f.addEventListener('change', function () {
+      Array.prototype.slice.call(f.files).forEach(function (file) {
+        api('/home/wallpaper/upload?name=' + encodeURIComponent(file.name), { method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream' } })
+          .then(function (r) { toast(r.ok ? 'Загружено: ' + file.name : 'Не удалось: ' + file.name); load(); });
+      });
+    });
+    box.appendChild(el('div', { class: 'row' }, f));
+    box.appendChild(grid);
+  }
+
+  // ------------------------------------------------------------------ состояние сервера
+  function fmtUp(sec) { var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60); return (d ? d + ' д ' : '') + h + ' ч ' + m + ' мин'; }
+  function spark(samples) {
+    var NS = 'http://www.w3.org/2000/svg', w = 560, h = 70;
+    var svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h); svg.setAttribute('width', '100%'); svg.setAttribute('height', h);
+    if (!samples || samples.length < 2) return svg;
+    var max = Math.max.apply(null, samples.map(function (x) { return x[1]; })) * 1.1, t0 = samples[0][0], t1 = samples[samples.length - 1][0] || t0 + 1;
+    var pts = samples.map(function (x) { return (((x[0] - t0) / Math.max(1, t1 - t0)) * (w - 4) + 2).toFixed(1) + ',' + (h - 4 - (x[1] / max) * (h - 8)).toFixed(1); }).join(' ');
+    var pl = document.createElementNS(NS, 'polyline'); pl.setAttribute('points', pts); pl.setAttribute('fill', 'none'); pl.setAttribute('stroke', 'currentColor'); pl.setAttribute('stroke-width', '2');
+    svg.appendChild(pl); return svg;
+  }
+  function renderOps(box, o) {
+    if (!o || (!o.version && !o.uptime_s)) { box.appendChild(el('p', { class: 'muted', text: 'Нет данных' })); return; }
+    var g = el('div', { class: 'grid4' });
+    [['Работает', fmtUp(o.uptime_s)], ['Память процесса', o.mem_mb + ' МБ'], ['Порог очистки', o.limit_mb + ' МБ'], ['База', fmtBytes(o.db_bytes)], ['Кеш', fmtBytes(o.cache_bytes)]]
+      .forEach(function (p) { g.appendChild(el('div', { class: 'stat' }, el('b', { text: p[1] }), el('span', { text: p[0] }))); });
+    box.appendChild(g);
+    box.appendChild(el('p', { class: 'muted', style: 'margin:10px 0 2px;font-size:13px', text: 'Память за последние сутки (шаг 5 минут)' }));
+    box.appendChild(spark(o.samples));
+    var cm = o.channel_manager || {};
+    box.appendChild(kv('Lampac', el('span', { text: 'версия ' + (o.version || '—') })));
+    box.appendChild(kv('Channel Manager', badge(cm.ok ? 'отвечает · ' + cm.ms + ' мс' : 'не отвечает', cm.ok ? 'ok' : 'bad')));
+    box.appendChild(kv('Последняя очистка памяти', el('span', { text: o.last_clean })));
+    box.appendChild(kv('Обмен с Кинопабом', el('span', { text: o.bridge_result || '—' })));
+    box.appendChild(kv('Закладки → «Мои фильмы»', el('span', { text: o.import_result || '—' })));
+    box.appendChild(kv('Копии базы (7 дней)', el('span', { text: (o.backups || []).map(function (b) { return b.name.replace('home-', '').replace('.db', '') + ' · ' + fmtBytes(b.bytes); }).join(' · ') || 'ещё нет' })));
+    var hs = o.host;
+    if (hs) {
+      box.appendChild(kv('Дежурная проверка (хост)', badge(hs.ok ? 'отвечает' : 'нет ответа', hs.ok ? 'ok' : 'bad')));
+      box.appendChild(kv('Ошибок в журнале за сутки', el('span', { text: String(hs.errors_24h) })));
+      box.appendChild(kv('Перезапусков за сутки', el('span', { text: String(hs.restarts_24h) + (hs.last_restart ? ' · последний ' + hs.last_restart : '') })));
+    } else {
+      box.appendChild(kv('Дежурная проверка (хост)', badge('не настроена', 'warn')));
+    }
+    box.appendChild(el('div', { class: 'row' },
+      el('button', { text: 'Очистить память', onclick: function () { api('/home/ops/clean').then(function (r) { toast('Готово: ' + (r.json && r.json.result)); load(); }); } }),
+      el('button', { text: 'Сделать копию базы', onclick: function () { api('/home/ops/backup').then(function () { toast('Копия создана'); load(); }); } })));
+  }
+  function renderAppLog(box, o) {
+    var list = (o && o.applog) || [];
+    if (!list.length) { box.appendChild(el('p', { class: 'muted', text: 'Записей пока нет — они появятся после следующего запуска приложения.' })); return; }
+    list.slice(0, 25).forEach(function (e) {
+      box.appendChild(kv(new Date(e.t).toLocaleString('ru') + ' · ' + e.dev, el('span', {}, badge(e.net ? 'сеть есть' : 'сети нет', e.net ? 'ok' : 'warn'), document.createTextNode(' ' + e.m))));
+    });
+  }
+  function renderImport(box, d) {
+    var folders = (d && d.folders) || [];
+    box.appendChild(el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:13px', text: 'Фильмы из отмеченных папок закладок Кинопаба один раз добавляются в «Мои фильмы». Убрали фильм из «Моих фильмов» — он не вернётся.' }));
+    if (!folders.length) { box.appendChild(el('p', { class: 'muted', text: 'Папок закладок нет или Кинопаб не привязан.' })); return; }
+    var boxes = [];
+    folders.forEach(function (f) {
+      var cb = el('input', { type: 'checkbox' }); cb.checked = !!f.selected; cb.dataset.id = f.id; boxes.push(cb);
+      box.appendChild(el('div', { class: 'row' }, el('label', {}, cb, document.createTextNode(' ' + f.title + ' · ' + f.count))));
+    });
+    box.appendChild(el('div', { class: 'row' }, el('button', { class: 'primary', text: 'Сохранить и импортировать', onclick: function () {
+      var ids = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.dataset.id; }).join(',');
+      api('/home/kp/folders/set?ids=' + ids).then(function (r) { toast(r.json && r.json.last ? r.json.last : 'Сохранено'); load(); });
+    } })));
+  }
+
+  // ------------------------------------------------------------------ YouTube: профили и каналы
+  function renderYt(box, d) {
+    box.appendChild(el('div', { class: 'sub', text: 'Набор каналов текущего зрителя. У «Основного» можно завести несколько. Детский профиль в режиме выбранных каналов берёт только разрешённый список.' }));
+    var profs = (d && d.profiles) || [];
+    profs.forEach(function (p) {
+      var wrap = el('div', { class: 'row', style: 'display:block;border-top:1px solid #2a2a2a;padding:.7em 0' });
+      var head = el('div', { style: 'display:flex;gap:.6em;align-items:center;margin-bottom:.4em' },
+        el('b', { text: p.label || p.name }), badge(p.subs + ' каналов'),
+        p.personal ? null : el('button', { text: 'Удалить набор', onclick: function () {
+          if (!confirm('Удалить набор «' + (p.label || p.name) + '» вместе с каналами?')) return;
+          api('/yt/profiles/remove?name=' + encodeURIComponent(p.name)).then(function () { toast('Профиль удалён'); load(); });
+        } }));
+      var list = el('div', { style: 'display:flex;flex-wrap:wrap;gap:.35em;margin:.3em 0' });
+      var ta = el('textarea', { rows: '3', style: 'width:100%;box-sizing:border-box', placeholder: 'Ссылки на каналы, @имена или id — по одному в строке или через запятую' });
+      var add = el('button', { class: 'primary', text: 'Добавить каналы', onclick: function () {
+        if (!ta.value.trim()) return;
+        add.disabled = true; add.textContent = 'Ищу каналы…';
+        api('/yt/subs/addmany?profile=' + encodeURIComponent(p.name), { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: ta.value })
+          .then(function (r) {
+            var j = r.json || {};
+            toast('Добавлено: ' + (j.added || []).length + ((j.failed || []).length ? '; не найдено: ' + j.failed.join(', ') : ''));
+    fetch('/home/admin/session', { credentials: 'include', cache: 'no-store' }).then(function () { load(); }).catch(function () { load(); });
+          });
+      } });
+      api('/yt/subs?profile=' + encodeURIComponent(p.name)).then(function (r) {
+        ((r.json && r.json.channels) || []).forEach(function (c) {
+          list.appendChild(el('span', { class: 'badge', style: 'cursor:pointer', title: 'Убрать канал', text: (c.title || c.id) + ' ✕', onclick: function () {
+            api('/yt/subs/remove?profile=' + encodeURIComponent(p.name) + '&ch=' + encodeURIComponent(c.id)).then(function () { load(); });
+          } }));
+        });
+      });
+      wrap.appendChild(head); wrap.appendChild(list); wrap.appendChild(ta); wrap.appendChild(el('div', { style: 'margin-top:.4em' }, add));
+      box.appendChild(wrap);
+    });
+    var nm = el('input', { type: 'text', placeholder: 'Имя нового профиля', style: 'margin-right:.5em' });
+    box.appendChild(el('div', { class: 'row', style: 'margin-top:.7em' }, nm, el('button', { class: 'primary', text: 'Создать профиль', onclick: function () {
+      var v = nm.value.trim();
+      if (!v) return;
+      api('/yt/profiles?add=' + encodeURIComponent(v)).then(function (r) {
+        if (r.ok) { toast('Набор создан'); load(); }
+        else if (r.json && r.json.error === 'child_channels') toast('У этого детского профиля каналы задаются только разрешённым списком');
+        else toast('Имя: от 1 до 32 символов, без знаков / ? & # :');
+      });
+    } })));
+  }
+
+  // ------------------------------------------------------------------ TorrServer
+  function renderTs(box, d) {
+    box.appendChild(el('div', { class: 'sub', text: 'Адрес TorrServer для всех устройств. Lampa на устройствах берёт его при запуске (внутренний клиент торрентов).' }));
+    var inp = el('input', { type: 'text', value: (d && d.url) || '', style: 'width:22em;margin-right:.5em', placeholder: 'http://адрес:8090' });
+    var res = el('span', { class: 'sub', style: 'margin-left:.6em' });
+    box.appendChild(el('div', { class: 'row', style: 'margin-top:.6em' }, inp,
+      el('button', { class: 'primary', text: 'Сохранить', onclick: function () {
+        api('/home/torrserver?url=' + encodeURIComponent(inp.value.trim())).then(function (r) { if (r.ok) toast('Адрес сохранён'); else toast('Недопустимый адрес'); });
+      } }),
+      el('button', { text: 'Проверить', style: 'margin-left:.4em', onclick: function () {
+        res.textContent = 'проверяю…';
+        api('/home/torrserver?test=true').then(function (r) { var j = r.json || {}; res.textContent = j.ok ? 'доступен: ' + String(j.version || '').slice(0, 40) : 'не отвечает (' + (j.error || '') + ')'; });
+      } }), res));
+  }
+
+  // ------------------------------------------------------------------ сборка
+  var serviceTimer;
+  function serviceLabel(c) {
+    var labels={
+      lampac:'Lampac — ядро, библиотеки и парсеры',
+      parsers:'Парсеры — входят в обновление Lampac',
+      homemedia:'HomeMedia — профили и синхронизация',
+      'channel-manager':'Channel Manager — телевидение',
+      tvheadend:'Tvheadend — спутниковые каналы',
+      torserver:'TorrServer — торренты',
+      'yt-dlp':'yt-dlp — YouTube'
+    };
+    return labels[c.id]||c.name||c.id;
+  }
+  function renderServices() {
+    clearTimeout(serviceTimer);
+    var host=document.getElementById('service-control');
+    if(!host){host=sec('Службы и обновления','управление и откат','wide');host.id='service-control';}
+    api('/home/admin/services').then(function(response){
+      if(!response.ok)throw new Error(response.json&&response.json.error||response.status);
+      var data=response.json||{};
+      if(!document.body.contains(host))return;
+      host.textContent='';host.appendChild(el('h2',{text:'Службы и обновления'}));
+      host.appendChild(el('p',{class:'muted',text:'Lampac обновляет ядро, библиотеки и парсеры одним проверенным комплектом. HomeMedia и Channel Manager принимают отдельные пакеты. Tvheadend доступен для проверки. Сначала «Скачать и проверить», затем «Обновить»; при неудаче программа откатывается, просмотры и настройки сохраняются.'}));
+      host.appendChild(el('p',{class:'muted',text:'Автоматика раз в сутки проверяет версии или скачивает и проверяет пакет. Установка всегда запускается вручную. Режим «Выключено» отключает следующие автоматические задачи; уже начатая проверка может завершиться.'}));
+      host.appendChild(el('p',{text:data.worker_online?'Обновления могут прервать просмотр. При заметном трафике задача отклоняется: повторите после просмотра.':'Исполнитель управления не подключён. Изменение служб недоступно.',class:'muted'}));
+      var links=el('p',{class:'row',style:'gap:.7em;flex-wrap:wrap'});
+      // These services share CT116 on the home LAN. Keep the links explicit so
+      // opening the page through a proxy/hostname does not point at the wrong host.
+      [['Channel Manager','http://192.168.1.80:3002/'],['TorrServer','http://192.168.1.80:8090/'],['Tvheadend','http://192.168.1.80:9981/gui/']].forEach(function(x){
+        links.appendChild(el('a',{href:x[1],text:x[0],target:'_blank',rel:'noopener',title:x[0]==='Tvheadend'?'Откроется с запросом логина Tvheadend':''}));
+      });
+      links.appendChild(el('span',{class:'muted',text:'Tvheadend запросит штатный логин и пароль; защита отключена не была.'}));
+      host.appendChild(links);
+      (data.services||[]).forEach(function(c){
+        var label=serviceLabel(c);var line=el('div',{class:'dev'});line.appendChild(el('b',{text:label+' · '+(!c.installed?'не установлена':c.active?'работает':'выключена')}));
+        line.appendChild(el('p',{class:'muted',text:'Установлено: '+(c.version||'версия неизвестна')+(c.latest?' · доступно: '+c.latest:'')+(c.prepared?' · проверено: '+c.prepared:'')}));
+        if(c.update_note)line.appendChild(el('p',{class:'muted',text:c.update_note}));
+        if(c.error)line.appendChild(el('p',{class:'muted',text:'Последняя проверка: '+c.error}));
+        if(c.automation_available){
+          var policy=el('select',{'aria-label':'Автоматическая проверка '+label});
+          [['off','Выключено'],['check','Проверять версии'],['prepare','Скачивать и проверять']].forEach(function(p){policy.appendChild(el('option',{value:p[0],text:p[1]}));});
+          policy.value=c.automation_mode||'off';policy.disabled=!data.worker_online;
+          policy.onchange=function(){policy.disabled=true;api('/home/admin/services/automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({component:c.id,mode:policy.value})}).then(function(r){toast(r.ok?'Режим сохранён':r.json&&r.json.error||'Не удалось сохранить режим');renderServices();}).catch(function(e){toast(String(e));renderServices();});};
+          line.appendChild(el('span',{class:'muted',text:'Автоматическая проверка: '}));line.appendChild(policy);
+        }
+        [['check','Проверить'],['prepare','Скачать и проверить'],['package','Загрузить пакет'],['start','Включить'],['stop','Выключить'],['update','Обновить'],['rollback','Откатить']].forEach(function(pair){
+          if((c.monitor_only||c.managed_by)&&pair[0]!=='check')return;
+          var b=el('button',{text:pair[1]});b.disabled=!data.worker_online||(c.actions||[]).indexOf(pair[0])<0||data.pending>0;
+          if(pair[0]==='update'&&b.disabled)b.title=c.update_note||'Нет подготовленного проверенного пакета';
+          b.onclick=function(){
+            if(pair[0]==='package'){
+              var picker=document.createElement('input');picker.type='file';picker.accept='.tar,.gz,.tgz';
+              picker.onchange=function(){var file=picker.files&&picker.files[0];if(!file)return;b.disabled=true;toast('Загружаю и проверяю пакет…');api('/home/admin/services/package?component='+encodeURIComponent(c.id),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file}).then(function(r){toast(r.ok?'Пакет загружен, проверка началась':r.json&&r.json.error||'Не удалось загрузить пакет');renderServices();}).catch(function(e){toast(String(e));renderServices();});};picker.click();return;
+            }
+            if(pair[0]!=='check'&&!confirm(pair[1]+' «'+label+'»? '+(pair[0]==='rollback'?'Вернётся предыдущая программа. Новые просмотры, каналы и настройки сохранятся.':pair[0]==='prepare'?'Работающая версия останется прежней до нажатия «Обновить».':'Служба может кратковременно остановиться.')))return;
+            b.disabled=true;api('/home/admin/services/job',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({component:c.id,action:pair[0]})}).then(function(r){toast(r.ok&&r.json&&r.json.queued?'Задача поставлена в очередь':(r.json&&r.json.error)||'Ошибка сервера');renderServices();}).catch(function(e){toast(String(e));renderServices();});
+          };line.appendChild(b);
+        });host.appendChild(line);
+      });
+      if(data.pending)host.appendChild(el('p',{text:'Выполняется задача. Журнал обновится автоматически.'}));
+      (data.jobs||[]).forEach(function(j){host.appendChild(el('p',{text:j.component+' / '+j.action+': '+(j.ok?'готово':j.error||'ошибка')+(j.rolled_back?' · выполнен автоматический откат':'')}));});
+      serviceTimer=setTimeout(renderServices,10000);
+    }).catch(function(e){
+      if(!document.body.contains(host))return;
+      var error=host.querySelector('.service-poll-error');
+      if(!error){error=el('p',{class:'service-poll-error muted'});host.appendChild(error);}
+      error.textContent='Связь с сервером прервана. Повторная проверка через 10 секунд.';
+      serviceTimer=setTimeout(renderServices,10000);
+    });
+  }
+
+  function load() {
+    var main = document.getElementById('main');
+    main.textContent = '';
+    Promise.all([
+      api('/home/stats'), api('/home/dev/list'), api('/home/wallpapers'), api('/kp/profiles'), api('/ym/status'),
+      api('/local/config'), api('/local/status'), api('/tv/status'), api('/tv/config'), api('/anime/status'),
+      api('/home/ops/status'), api('/home/kp/folders'), api('/yt/profiles'), api('/home/torrserver'), api('/home/admin/profiles')
+    ]).then(function (r) {
+      if (r.some(function (x) { return x.status === 401 || (x.json && x.json.error === 'session_required'); })) {
+        var box = sec('Нужен вход', 'сеанс профиля');
+        box.appendChild(el('p', { text: 'Панель читает данные основного профиля. Откройте «Профили и вход», войдите в «Основной» и обновите эту страницу.' }));
+        box.appendChild(el('a', { href: '/profiles', text: 'Профили и вход' }));
+        return;
+      }
+      var J = function (i) { return (r[i] && r[i].json) || null; };
+      walls = (J(2) && J(2).files) || [];
+      kpProfiles = (J(3) && J(3).profiles) || [];
+      devList = (J(1) && J(1).devices) || [];
+      renderPeople(sec('Зрители', 'возраст и привязка к устройству', 'wide'), J(14), devList);
+      renderSync(sec('Синхронизация и база', 'единый источник'), J(0) || {});
+      renderDevices(sec('Устройства и профили', 'настройки хранятся на сервере', 'wide'), devList);
+      renderOps(sec('Состояние сервера', 'память, копии, источники', 'wide'), J(10));
+      renderKino(sec('Кинопаб', 'привязка и профили'), kpProfiles);
+      renderImport(sec('Закладки Кинопаба', 'импорт в «Мои фильмы»'), J(11));
+      renderYt(sec('YouTube', 'профили и каналы'), J(12));
+      renderTs(sec('TorrServer', 'адрес для всех устройств'), J(13));
+      renderYm(sec('Яндекс.Музыка', 'привязка'), J(4));
+      renderLocal(sec('Локальная библиотека', 'Plex и папки'), J(5), J(6));
+      renderTv(sec('Телевидение', 'Channel Manager'), J(7), J(8));
+      renderAnime(sec('Аниме онлайн', 'источники'), J(9));
+      renderAppLog(sec('Журнал запусков приложений', 'почему приложение могло не открыться', 'wide'), J(10));
+      renderWalls(sec('Обои', 'папка database/wallpapers', 'wide'));
+      // Службы запрашиваются отдельным admin-сеансом, чтобы их обновление не
+      // блокировало основные разделы панели. Раньше функция была объявлена,
+      // но не вызывалась, поэтому ссылки и кнопки не отображались.
+      renderServices();
+    }).catch(function (e) {
+      sec('Панель не загрузилась', '').appendChild(el('p', { text: String(e && e.message || e) }));
+    });
+  }
+
+  document.getElementById('refresh').addEventListener('click', load);
+  setInterval(function () { document.getElementById('clock').textContent = new Date().toLocaleString('ru'); }, 1000);
+  // Browser sessions do not have the Android bridge cookie. The same local
+  // admin login used by /profiles can issue it without exposing the token to JS.
+  fetch('/home/admin/login', { method: 'POST', credentials: 'include', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: 'u_default', pin: '', device: 'web_panel', boot: 'panel-' + Date.now() }) }).then(function (r) { return r.json(); }).then(function (j) { adminToken = j.token || ''; load(); }).catch(function () { load(); });
+})();
+</script>
+</body>
+</html>

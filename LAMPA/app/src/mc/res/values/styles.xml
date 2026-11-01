@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Оболочка полупрозрачная на уровне окна: Lampa под ней остаётся «видимой» для системы (WebView не замедляется), пользователь видит только оболочку -->
+    <style name="Theme.Shell" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
