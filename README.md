@@ -40,6 +40,8 @@ cd LAMPA
 
 ## Релиз
 
-- HomeMedia: `2026.11.01.14`
+- HomeMedia: `2026.11.01.15`
 - APK: `1.16.11-mc`, versionCode `1129`
 - SHA-256 APK: `952635cc4b799549107cf40b95d1024aecf15fa9be6f2b7f5bfbc678e6318ebd`
+
+Пакет последнего релиза: `release/homemedia-2026.11.01.15.tar.gz`.
