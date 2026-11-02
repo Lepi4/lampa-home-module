@@ -4,7 +4,7 @@ ROOT=pathlib.Path(__file__).resolve().parents[2]
 p=argparse.ArgumentParser();p.add_argument('--host',default='proxmox');p.add_argument('--ct',type=int,default=116);a=p.parse_args()
 bundle=io.BytesIO()
 with tarfile.open(fileobj=bundle,mode='w:gz') as archive:
-    files={f'payload/{n}':(ROOT/'server-mod/HomeMedia'/n).read_bytes() for n in ['NetworkProxy.cs','ServiceUi.cs','Youtube.cs','YoutubeReliability.cs','KinoPubController.cs','KpSearch.cs','manifest.json']}
+    files={f'payload/{n}':(ROOT/'server-mod/HomeMedia'/n).read_bytes() for n in ['NetworkProxy.cs','ServiceUi.cs','Youtube.cs','YoutubeReliability.cs','KinoPubController.cs','KpSearch.cs','Panel.cs','ProfilesController.cs','manifest.json']}
     manifest=json.loads(files['payload/manifest.json']);manifest['tree'].append('ProxyFixture.cs');files['payload/manifest.json']=json.dumps(manifest).encode()
     files['payload/ProxyFixture.cs']=(ROOT/'server-mod/tests/ProxyFixture.cs').read_bytes()
     files['network-proxy-http.py']=(ROOT/'server-mod/tests/network-proxy-http.py').read_bytes()

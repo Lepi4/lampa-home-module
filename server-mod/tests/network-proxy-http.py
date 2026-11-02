@@ -1,5 +1,5 @@
 """Admin-only proxy configuration and rollback contracts; offline test instance only."""
-import json,os,time,urllib.request,urllib.error,threading,http.server,base64
+import json,os,time,urllib.request,urllib.error,threading,http.server,base64,http.cookiejar
 base=os.environ['PROFILE_TEST_URL'].rstrip('/')
 opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 def req(path,token=None,body=None,headers=None):
@@ -17,6 +17,13 @@ passed=[]
 def check(name,value):
     assert value,name
     passed.append(name)
+jar=http.cookiejar.CookieJar()
+browser=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor(jar))
+login=urllib.request.Request(base+'/home/admin/login',data=json.dumps({'profile_id':'u_default','device':'proxy_cookie_contract','boot':'isolated'}).encode(),headers={'Content-Type':'application/json'})
+with browser.open(login,timeout=10) as r:
+    json.load(r)
+check('admin login emits functional session cookie',any(c.name=='home_session' for c in jar))
+with browser.open(base+'/home/admin/proxy',timeout=10) as r:check('new browser request authenticates by cookie only',r.status==200)
 check('anonymous cannot read proxy settings',req('/home/admin/proxy')[0]==401)
 for ident,child in [('u_proxy_child',True),('u_proxy_adult',False)]:
     assert req('/home/admin/profiles',admin,{'id':ident,'name':ident,'is_child':child,'max_age':12 if child else 18})[0]==200
@@ -100,6 +107,7 @@ try:
     prefix='/home/services/channel-manager/'
     status,headers,text=ui(prefix)
     check('relative service UI is served',status==200 and '<base href=\''+prefix in text and 'href="'+prefix+'api/channels"' in text)
+    with browser.open(base+prefix,timeout=10) as r:check('new tab opens service by cookie without header token',r.status==200)
     check('UI proxy preserves filesystem paths', 'var path="/opt/tvlink/data"' in text)
     check('service cookies scoped to mounted path',prefix in headers.get('Set-Cookie',''))
     status,headers,text=ui(prefix+'api/channels?x=1',headers={'Cookie':'home_session=private; home_web_device=private; service_cookie=ok'})

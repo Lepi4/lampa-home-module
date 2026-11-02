@@ -101,7 +101,7 @@ public class ProfilesController : BaseController
             string dev=(string)b["device"]??"web_admin",boot=(string)b["boot"]??Guid.NewGuid().ToString("N");
             if(!IdOk(dev)||!IdOk(boot)||!Profiles.CheckPin(p,(string)b["pin"],dev))return J(new {error="pin_required_or_invalid"},403);
             var session=Profiles.CreateSession((string)p["id"],dev,boot);
-            Response.Cookies.Append("home_session",session.token,new CookieOptions{HttpOnly=true,SameSite=SameSiteMode.Lax,Path="/",MaxAge=TimeSpan.FromHours(24)});
+            Response.Cookies.Append("home_session",session.token,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/",MaxAge=TimeSpan.FromHours(24)});
             return J(Session(session));
         }catch(Exception e){return J(new {error=e.Message},400);}
     }
@@ -206,7 +206,7 @@ public class ProfilesController : BaseController
         var viewer=Viewer();string token=Request.Headers["X-Home-Session"].FirstOrDefault()??Request.Cookies["home_session"];
         if(viewer==null){var p=Profiles.Get(Profiles.DefaultId);if(!string.IsNullOrEmpty((string)p?["pin_hash"]))return Redirect("/profiles");
             string device=Request.Cookies["home_web_device"]??"web_"+Guid.NewGuid().ToString("N");var session=Profiles.CreateSession(Profiles.DefaultId,device,Guid.NewGuid().ToString("N"));viewer=session.scope;token=session.token;
-            Response.Cookies.Append("home_web_device",device,new CookieOptions{HttpOnly=true,SameSite=SameSiteMode.Lax,Path="/"});Response.Cookies.Append("home_session",token,new CookieOptions{HttpOnly=true,SameSite=SameSiteMode.Lax,Path="/"});}
+            Response.Cookies.Append("home_web_device",device,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/"});Response.Cookies.Append("home_session",token,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/"});}
         string address=Request.Scheme+"://"+Request.Host;
         using var http=new System.Net.Http.HttpClient{Timeout=TimeSpan.FromSeconds(15)};using var request=new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get,"http://127.0.0.1:9118/"+Request.QueryString.Value);
         request.Headers.Host=Request.Host.Value;request.Headers.Add("X-Home-Session",token);request.Headers.Add("X-Home-Web-Render","1");

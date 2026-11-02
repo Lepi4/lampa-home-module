@@ -153,7 +153,7 @@ public class PanelController : BaseController
                 string device = Request.Cookies["home_web_device"];
                 if (string.IsNullOrEmpty(device) || !Regex.IsMatch(device, "^[A-Za-z0-9_-]{1,80}$")) device = "web_" + Guid.NewGuid().ToString("N");
                 var session = Profiles.CreateSession((string)admin["id"], device, Guid.NewGuid().ToString("N"));
-                var cookie = new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = TimeSpan.FromHours(24) };
+                var cookie = new CookieOptions { HttpOnly = true, IsEssential = true, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = TimeSpan.FromHours(24) };
                 Response.Cookies.Append("home_web_device", device, cookie);
                 Response.Cookies.Append("home_session", session.token, cookie);
             }
@@ -181,7 +181,7 @@ public class PanelController : BaseController
         string device = Request.Cookies["home_web_device"];
         if (string.IsNullOrEmpty(device) || !Regex.IsMatch(device, "^[A-Za-z0-9_-]{1,80}$")) device = "web_" + Guid.NewGuid().ToString("N");
         var session = Profiles.CreateSession((string)admin["id"], device, Guid.NewGuid().ToString("N"));
-        var cookie = new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = TimeSpan.FromHours(24) };
+        var cookie = new CookieOptions { HttpOnly = true, IsEssential = true, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = TimeSpan.FromHours(24) };
         Response.Cookies.Append("home_web_device", device, cookie);
         Response.Cookies.Append("home_session", session.token, cookie);
         return Json(new { ok = true, profile = (string)admin["id"] });
