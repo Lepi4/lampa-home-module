@@ -445,6 +445,7 @@ class MainActivity : BaseActivity(),
     fun mcOpen(i: Intent) {
         mcCancelNavigation()
         val own=mcNavigationGeneration
+        browser?.evaluateJavascript("window.__mc_shell_origin=window.Lampa&&Lampa.Activity.active();window.__mc_ret=1"){ }
         val hold=i.getBooleanExtra("mc_hold_shell",false)
         if(hold) browser?.evaluateJavascript("window.__mc_nav_origin=window.Lampa&&Lampa.Activity.active();window.__mc_nav_select=document.querySelector('.selectbox')?.textContent||''"){}
         trustedHomeNavigation=true;try{onNewIntent(i)}finally{trustedHomeNavigation=false}

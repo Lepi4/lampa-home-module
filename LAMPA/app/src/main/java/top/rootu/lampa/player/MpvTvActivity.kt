@@ -429,7 +429,8 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         o("ao", if (sessionDrc != null) "audiotrack" else "audiotrack,opensles")
         sessionDrc?.let { o("audiotrack-session-id", it.sessionId.toString()) }
         o("audio-spdif", "")
-        afrOn = intent.getIntExtra("tv_afr", 1) == 1
+        afrOn = getSharedPreferences("home_player", MODE_PRIVATE).getBoolean("afr", intent.getIntExtra("tv_afr", 1) != 0)
+        android.util.Log.i("HomeAFR", "afr_config enabled=$afrOn live=true engine=mpv")
         o("alang", "rus,ru")
         o("sub", "no")
         o("keep-open", "no")

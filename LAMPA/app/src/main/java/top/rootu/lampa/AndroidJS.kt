@@ -269,6 +269,15 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
 
     @JavascriptInterface
     @org.xwalk.core.JavascriptInterface
+    fun mcSetAfr(enabled: Boolean) {
+        mainActivity.getSharedPreferences("home_player", android.content.Context.MODE_PRIVATE).edit().putBoolean("afr", enabled).apply()
+    }
+    @JavascriptInterface
+    @org.xwalk.core.JavascriptInterface
+    fun mcGetAfr(): Boolean = mainActivity.getSharedPreferences("home_player", android.content.Context.MODE_PRIVATE).getBoolean("afr", true)
+
+    @JavascriptInterface
+    @org.xwalk.core.JavascriptInterface
     @Throws(JSONException::class)
     fun openTorrentLink(url: String, jsonString: String): Boolean {
         val jsonData = if (jsonString == "\"\"") JSONObject() else JSONObject(jsonString)

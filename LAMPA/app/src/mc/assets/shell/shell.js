@@ -914,7 +914,7 @@
     if (!state.server) { setupFind(); return; }
     if (!ensureUser()) return;
     seedLampa();
-    state.dev = load('mc_dev', {}); applyWall();
+    state.dev = load('mc_dev', {}); syncAfr(); applyWall();
     buildBar(); buildApps();
     var cached = load('mc_cfg', null) || DEFAULT_ROWS.map(function (r) { return { id: r.id, title: r.title, style: r.style, url: '' }; });
     var local = cached.map(function (r) { return { id: r.id, title: r.title, style: r.style, url: r.url }; });
@@ -923,7 +923,7 @@
     rebuildNav(); setFocus(state.nav.length > 1 ? 1 : 0, 0, true);
     var dev = MC.deviceId();
     api('/home/shell/config?dev=' + encodeURIComponent(dev) + '&profile=' + encodeURIComponent(state.profile), function (c) {
-      state.dev = c.dev || {}; save('mc_dev', state.dev); applyWall(); inheritWall();
+      state.dev = c.dev || {}; save('mc_dev', state.dev); syncAfr(); applyWall(); inheritWall();
       state.sources=c.sources||{};state.allRows=c.all_rows||c.rows||[];
       refreshMyChannels();
       var rows = (c.rows || []).map(function (r) { return { id: r.id, title: r.title, style: r.style, url: r.url }; });
@@ -961,8 +961,10 @@
   function devSet(k, v, cb) {
     state.dev = state.dev || {}; if (v === '' || v == null) delete state.dev[k]; else state.dev[k] = String(v);
     save('mc_dev', state.dev);
+    if (k === 'afr') syncAfr();
     api('/home/dev/set?dev=' + encodeURIComponent(MC.deviceId()) + '&k=' + encodeURIComponent(k) + (v === '' || v == null ? '' : '&v=' + encodeURIComponent(v)), function () { if (cb) cb(); }, function () { toast('Не удалось сохранить на сервере'); });
   }
+  function syncAfr() { try { if (MC.setAfrMode && state.dev && state.dev.afr != null) MC.setAfrMode(String(state.dev.afr) !== '0'); } catch (e) {} }
   var OPT = {
     mc_auto: { t: 'Автозапуск телевидения', d: '0', o: [['0', 'выключен'], ['1', 'включён: сразу включать последний канал']], hint: 'при включении приставки и после долгого сна' },
     engine: { t: 'Движок эфира', d: 'exo', o: [['exo', 'ExoPlayer'], ['mpv', 'mpv · копирование'], ['mpv_embed', 'mpv · прямой вывод'], ['mpv_hw', 'mpv · аппаратный'], ['mpv_sw', 'mpv · программный']] },
@@ -1057,8 +1059,10 @@
     row('Динамика звука (DRC)', 'ТВ, кино, сериалы, аниме, YouTube и рестлинг · ExoPlayer и mpv · со следующего запуска плеера', function () { return drcLabels[drcMode()]; }, function (dir, paint) {
       MC.setDrcMode((drcMode() + dir + 3) % 3); paint();
     });
+    group('Экран — все источники');
+    opt('afr');
     group('Телевидение');
-    opt('mc_auto'); opt('engine'); opt('buf'); opt('font'); opt('alpha'); opt('afr');
+    opt('mc_auto'); opt('engine'); opt('buf'); opt('font'); opt('alpha');
     group('Кино и сериалы');
     opt('maxh'); opt('vodbuf');
     var kpRow = row('Профиль Кинопаба', 'аккаунт и качество воспроизведения', function () { return (state.dev || {}).kpprof || state.profile || 'main'; }, null, function (paint) {

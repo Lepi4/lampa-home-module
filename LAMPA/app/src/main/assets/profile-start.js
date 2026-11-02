@@ -4,7 +4,7 @@ var owner = window.__home_scope;
 if (!owner || !owner.profiles_enabled || !owner.ready) return;
 var profile = owner.profile, origin = new URL(owner.server_base).origin;
 var prefix = 'home_user:' + owner.server_id + ':' + profile.id + ':';
-var shared = /^(torrserver_url|torrserver_url_two|parser_torrent_type|jackett_url|jackett_key|protocol|cub_mirrors|cub_domain|cub_alive|language|interface_size|device|platform|invc_.*|home_device_.*)$/;
+var shared = /^(torrserver_url|torrserver_url_two|tv_afr_v1|parser_torrent_type|jackett_url|jackett_key|protocol|cub_mirrors|cub_domain|cub_alive|language|interface_size|device|platform|invc_.*|home_device_.*)$/;
 var store = window.localStorage, proto = Storage.prototype;
 var get = proto.getItem, set = proto.setItem, remove = proto.removeItem, key = proto.key;
 function scoped(k) { k=String(k); return shared.test(k) ? k : prefix+k; }
@@ -160,27 +160,39 @@ function init(){
  }
  Lampa.Activity.push=function(object){if(!cfg.torrent_auto||object.component!=='torrents'||Date.now()<manualUntil)return push.apply(this,arguments);
    var movie=object.movie;if(!movie||!Lampa.Parser||!Lampa.Torserver)return manual(object);var own=++generation,active=Lampa.Activity.active();
-   function fallback(){if(own!==generation||Lampa.Activity.active()!==active)return;manual(object);}
-   clearTimeout(autoTimer);autoTimer=setTimeout(fallback,35000);
-   torrentProgress('Ищу подходящую раздачу…','Проверяю подключение к TorrServer');
+   var finishSelection=null;
+   function valid(){return own===generation&&Lampa.Activity.active()===active;}
+   function fallback(){if(!valid())return;manual(object);}
+   clearTimeout(autoTimer);autoTimer=setTimeout(function(){if(!valid())return;if(finishSelection)finishSelection();else {Lampa.Noty.show('Поиск занял слишком много времени — ручной выбор');fallback();}},90000);
+   torrentProgress('Ищу подходящую раздачу…','Определяю фильм или следующую серию · Назад — отмена');
    chooseTarget(movie,function(target){if(own!==generation||Lampa.Activity.active()!==active)return;if(target===false)return fallback();
      torrentProgress('Ищу подходящую раздачу…','Получаю результаты поиска');
      Lampa.Parser.get(object,function(data){var candidates=(data.Results||[]).filter(function(e){return eligible(e)&&sameTitle(e,movie,target);});candidates.sort(function(a,b){return resolution(b)-resolution(a)||+(b.Size||0)-+(a.Size||0);});if(!candidates.length){Lampa.Noty.show('Подходящих раздач нет — ручной выбор');return fallback();}
        // Bound metadata work: compare the actual episode files of the eight largest eligible releases.
-       var counts={},pool=candidates.filter(function(e){var h=resolution(e);counts[h]=(counts[h]||0)+1;return counts[h]<=2;}).slice(0,8),best=null,spare=null,deadline=Date.now()+35000;
+       var counts={},pool=candidates.filter(function(e){var h=resolution(e);counts[h]=(counts[h]||0)+1;return counts[h]<=2;}).slice(0,8),total=pool.length,best=null,spare=null,deadline=Date.now()+60000,finished=false;
        function consider(release,file){var size=+(file.length||file.size||0),key=release.MagnetUri||release.Link||release.Title,item={release:release,file:file,size:size,key:key,height:resolution(release)};if(!best||item.height>best.height||(item.height===best.height&&size>best.size)){if(best&&best.key!==key)spare=best;best=item;}else if(key!==best.key&&(!spare||size>spare.size))spare=item;}
-       function next(){if(own!==generation||Lampa.Activity.active()!==active)return;if(!pool.length||Date.now()>deadline){if(!best){Lampa.Noty.show('Не удалось проверить файлы — ручной выбор');return fallback();}clearTimeout(autoTimer);pendingAuto={path:best.file.path,movie:movie};pendingRetry={attempt:Date.now()+':'+own+':'+Math.random().toString(36).slice(2),release:spare&&spare.release,file:spare&&spare.file,movie:movie,object:object,at:Date.now(),used:false};torrentStartWithProgress(best.release,movie,'Запускаю выбранную раздачу…','Открываю список файлов');return;}
-         torrentProgress('Проверяю файлы раздач…','Осталось проверить '+pool.length+' из '+candidates.length);
-         var release=pool.shift();Lampa.Torserver.hash({title:release.Title,link:release.MagnetUri||release.Link,poster:movie.poster_path,data:{lampa:true,movie:movie}},function(result){var attempts=0;
-           function files(){if(own!==generation||Lampa.Activity.active()!==active)return;Lampa.Torserver.files(result.hash,function(d){if(d.file_stats){var list=videoFiles(d.file_stats,movie,target);list.forEach(function(f){consider(release,f);});next();}else if(++attempts<6&&Date.now()<deadline)setTimeout(files,750);else next();},next);}files();
-         },next);
+       finishSelection=function(){if(finished||!valid())return;finished=true;clearTimeout(autoTimer);if(!best){Lampa.Noty.show('Не удалось проверить файлы — ручной выбор');return fallback();}pendingAuto={path:best.file.path,movie:movie};pendingRetry={attempt:Date.now()+':'+own+':'+Math.random().toString(36).slice(2),release:spare&&spare.release,file:spare&&spare.file,movie:movie,object:object,at:Date.now(),used:false};torrentStartWithProgress(best.release,movie,'Запускаю выбранную раздачу…','Открываю список файлов');};
+       function next(){if(finished||!valid())return;if(!pool.length||Date.now()>deadline)return finishSelection();
+         torrentProgress('Проверяю файлы раздач…','Раздача '+(total-pool.length+1)+' из '+total+' · Назад — отмена');
+         var release=pool.shift(),done=false,watchdog=setTimeout(skip,10000);
+         function skip(){if(done||finished||!valid())return;done=true;clearTimeout(watchdog);next();}
+         Lampa.Torserver.hash({title:release.Title,link:release.MagnetUri||release.Link,poster:movie.poster_path,data:{lampa:true,movie:movie}},function(result){
+           if(done||finished||!valid())return;var until=Date.now()+7500;
+           function files(){if(done||finished||!valid())return;
+             // The core Torserver.files suppresses success while metadata is absent.
+             // Poll independently so each empty response can schedule the next attempt.
+             $.ajax({url:Lampa.Torserver.url()+'/torrents',type:'POST',contentType:'application/json',data:JSON.stringify({action:'get',hash:result.hash}),dataType:'json',timeout:2500,
+               success:function(d){if(done||finished||!valid())return;if(d&&d.file_stats&&d.file_stats.length){var normalized=Lampa.Torserver.clearFileName?Lampa.Torserver.clearFileName(d.file_stats):d.file_stats;videoFiles(normalized,movie,target).forEach(function(f){consider(release,f);});skip();}else if(Date.now()<until)setTimeout(files,750);else skip();},
+               error:function(){if(Date.now()<until)setTimeout(files,750);else skip();}});
+           }files();
+         },skip);
        }
        Lampa.Torserver.connected(next,function(){fallback();});
      },function(){fallback();});
    });return;
  };
  window.__homeTorrentRetry=function(result){var job=pendingRetry;if(!job||!result||result.attempt!==job.attempt||result.profile!==profile.id)return;if(!result.startupFailed){pendingRetry=null;torrentProgressHide();return;}if(job.used||Date.now()-job.at>20000||!job.release){pendingRetry=null;Lampa.Noty.show('Не запустилось — ручной выбор');return manual(job.object);}job.used=true;job.at=Date.now();Lampa.Noty.show('Пробую другую раздачу…');torrentProgress('Пробую другую раздачу…','Перезапускаю проверку файла');pendingAuto={path:job.file.path,movie:job.movie};torrentStartWithProgress(job.release,job.movie);};
- Lampa.Listener.follow('torrent_file',function(e){if(e.type==='render'&&!pendingAuto)torrentProgressHide();if(e.type==='render'&&pendingAuto&&e.element.path===pendingAuto.path){pendingAuto=null;autoPlaybackPending=true;torrentProgress('Открываю выбранный файл…','Запускаю плеер');setTimeout(function(){torrentProgressHide();e.item.trigger('hover:enter');},0);}if(e.type==='list_close'){pendingAuto=null;torrentProgressHide();}});
+ Lampa.Listener.follow('torrent_file',function(e){if(e.type==='render'&&!pendingAuto)torrentProgressHide();if(e.type==='render'&&pendingAuto&&e.element.path===pendingAuto.path){var launchGeneration=generation;pendingAuto=null;autoPlaybackPending=true;torrentProgress('Открываю выбранный файл…','Запускаю плеер');setTimeout(function(){if(launchGeneration!==generation||!autoPlaybackPending)return;torrentProgressHide();e.item.trigger('hover:enter');},0);}if(e.type==='list_close'){pendingAuto=null;autoPlaybackPending=false;torrentProgressHide();}});
  if(Lampa.Torrent&&Lampa.Torrent.start&&!Lampa.Torrent.start.__homeProgress){var originalTorrentStart=Lampa.Torrent.start;Lampa.Torrent.start=function(release,movie){return torrentStartWithProgress(release,movie);};Lampa.Torrent.start.__homeProgress=true;Lampa.Torrent.start.__homeOriginal=originalTorrentStart;}
  Lampa.Listener.follow('full',function(e){if(e.type!=='complite')return;
    var movie=e.data&&e.data.movie;if(movie&&movie.id)$.getJSON(owner.server_base+'/home/content-kind?media='+(movie.name?'tv':'movie')+'&id='+movie.id,function(d){if(d.kind)movie.home_kind=d.kind;});

@@ -912,6 +912,7 @@
     var first = 0;
     season.episodes.forEach(function (e, i) { if (!first && !epDone(item, season, e)) first = i + 1; });
     Lampa.Select.show({
+      home_episodes: true,
       title: splitTitle(item.title).ru + ' · сезон ' + season.number + ' (удержание ОК — отметка)',
       items: season.episodes.map(function (e, i) {
         var w = e.watching || {};
@@ -2262,6 +2263,12 @@
   };
 
   // «Назад» из приложения: настройки и поиск закрываем контроллером Lampa (history.back() их не закрывает и зацикливается)
+  // Keep episode lists inside the actual viewport, including a safe bottom gap.
+  if (Lampa.Select.listener && !window.__homeEpisodeViewport) {
+    window.__homeEpisodeViewport = true;
+    $('<style>.home-series-select .selectbox__content{display:flex;flex-direction:column;height:100vh!important;max-height:100vh;box-sizing:border-box;padding-bottom:1em;overflow:hidden}.home-series-select .selectbox__head{flex:none}.home-series-select .selectbox__body{height:0!important;min-height:0;flex:1;overflow:hidden}.home-series-select .scroll--mask{-webkit-mask-image:none;mask-image:none}</style>').appendTo('head');
+    Lampa.Select.listener.follow('fullshow', function(e) { e.html.toggleClass('home-series-select', !!e.active.home_episodes); });
+  }
   // Lampa Media Center: оболочка присваивает window.__mc_ret = 1 при открытии карточки; запоминаем глубину стека Lampa на этой карточке,
   // чтобы «Назад» с неё вёл на оболочку, как бы ни выглядел прежний путь по Lampa
   try {
@@ -2271,7 +2278,8 @@
       get: function () { return mcV; },
       set: function (v) {
         if (v === 1) {
-          var fresh = window.__mc_lastT && (Date.now() - window.__mc_lastT) < 4000;
+          var current = Lampa.Activity.active();
+          var fresh = current && current.component !== 'main' && current !== window.__mc_shell_origin && window.__mc_lastT && (Date.now() - window.__mc_lastT) < 4000;
           if (fresh) { mcV = 2; window.__mc_base = window.__mc_lastLen; } else { mcV = 3; window.__mc_base = 0; }   // 3 — карточка ещё не открылась
         } else { mcV = v; }
       }
@@ -2279,7 +2287,7 @@
     Lampa.Listener.follow('activity', function (e) {
       if (e && e.type === 'start') {
         window.__mc_lastLen = Lampa.Activity.all().length; window.__mc_lastT = Date.now();
-        if (mcV === 3) { mcV = 2; window.__mc_base = window.__mc_lastLen; }
+        if (mcV === 3 && Lampa.Activity.active() !== window.__mc_shell_origin && Lampa.Activity.active().component !== 'main') { mcV = 2; window.__mc_base = window.__mc_lastLen; }
       }
     });
     // страховка: если Lampa сама ушла с карточки глубже базы (любой путь назад), возвращаем оболочку

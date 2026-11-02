@@ -117,7 +117,7 @@
   // ---------- выбор и воспроизведение ----------
   function showSelect(title, items, back, onSelect, onLong) {
     Lampa.Select.show({
-      title: title, items: items,
+      title: title, items: items, home_episodes: true,
       onBack: back,
       onSelect: function (a) { setTimeout(function () { onSelect(a); }, 250); },
       onLong: onLong ? function (a) { onLong(a); } : undefined

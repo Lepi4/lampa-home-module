@@ -216,6 +216,9 @@ class ShellHost(private val a: MainActivity) : McHostApi {
         }
 
         @JavascriptInterface fun server(): String = a.appUrl
+        @JavascriptInterface fun setAfrMode(enabled: Boolean) {
+            a.getSharedPreferences("home_player", Context.MODE_PRIVATE).edit().putBoolean("afr", enabled).apply()
+        }
 
         // диагностический журнал оболочки (тот же буфер, что у плеера и страницы Lampa)
         @JavascriptInterface fun dlog(lvl: String, code: String, key: String, x: String) {

@@ -76,6 +76,7 @@ class HomePlayerActivity : Activity() {
     private lateinit var endsView: TextView
     private lateinit var bar: KnobBar
     private lateinit var controlsRow: LinearLayout
+    private lateinit var transportRow: LinearLayout
     private lateinit var kickerView: TextView
     private lateinit var statsView: TextView
     private lateinit var endsTopView: TextView
@@ -646,7 +647,8 @@ class HomePlayerActivity : Activity() {
         timeRow.addView(endsView, LinearLayout.LayoutParams(0, -2, 1f))
 
         // кнопки: слева формат и скорость, по центру перемотка, справа качество, звук, субтитры, источник
-        controlsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        controlsRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+        transportRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         val leftG = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.START }
         val midG = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         val rightG = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL or Gravity.END }
@@ -654,30 +656,35 @@ class HomePlayerActivity : Activity() {
         playBtn = roundBtn("⏸") { togglePause() }
         val prevB = ctl("⏮", 20f) { step(-1) }
         prevEpBtn = prevB
-        val backB = ctl("↺ 15", 15f) { seekBy(-15_000) }
-        val fwdB = ctl("15 ↻", 15f) { seekBy(15_000) }
+        val backB = ctl("−30с", 16f) { seekBy(-30_000) }.apply { contentDescription = "Назад на 30 секунд" }
+        val fwdB = ctl("+30с", 16f) { seekBy(30_000) }.apply { contentDescription = "Вперёд на 30 секунд" }
         val nextB = ctl("⏭", 20f) { step(1) }
         nextEpBtn = nextB
         seekButtons.addAll(listOf(backB, fwdB))
-        firstCtl = prevB
+        prevB.contentDescription = "Предыдущая серия"; nextB.contentDescription = "Следующая серия"
 
         aspectBtn = ctl("⛶", 20f) { pickResize() }
+        firstCtl = aspectBtn
+        aspectBtn.contentDescription = "Формат изображения"
         speedBtn = ctl("1×", 15f) { pickSpeed() }
+        speedBtn.contentDescription = "Скорость воспроизведения"
         leftG.addView(aspectBtn); leftG.addView(speedBtn)
 
         midG.addView(prevB); midG.addView(backB); midG.addView(playBtn); midG.addView(fwdB); midG.addView(nextB)
 
         qualityBtn = ctl("Авто", 15f) { pickQuality() }
-        audioBtn = ctl("♪", 15f) { pickAudio() }
-        subsBtn = ctl("CC", 15f) { pickText() }
-        srcBtn = ctl("Источник", 15f) { pickSource() }
+        audioBtn = ctl("♪", 15f) { pickAudio() }.apply { maxWidth = dp(170); ellipsize = android.text.TextUtils.TruncateAt.END; contentDescription = "Звуковая дорожка" }
+        subsBtn = ctl("SUB", 15f) { pickText() }.apply { contentDescription = "Субтитры" }
+        srcBtn = ctl("⇄", 20f) { pickSource() }.apply { contentDescription = "Источник канала" }
         srcBtn.visibility = View.GONE
-        extBtn = ctl("Внешний ↗", 15f) { openExternal() }
+        extBtn = ctl("↗", 20f) { openExternal() }.apply { contentDescription = "Внешний плеер" }
         rightG.addView(srcBtn); rightG.addView(qualityBtn); rightG.addView(audioBtn); rightG.addView(subsBtn); rightG.addView(extBtn)
 
-        controlsRow.addView(leftG, LinearLayout.LayoutParams(0, -2, 1f))
-        controlsRow.addView(midG, LinearLayout.LayoutParams(-2, -2))
-        controlsRow.addView(rightG, LinearLayout.LayoutParams(0, -2, 1f))
+        transportRow.addView(midG, LinearLayout.LayoutParams(-2, -2))
+        val settingsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        settingsRow.addView(leftG); settingsRow.addView(rightG)
+        controlsRow.addView(transportRow, LinearLayout.LayoutParams(-1, -2))
+        controlsRow.addView(settingsRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
 
         bottom.addView(bar, LinearLayout.LayoutParams(-1, dp(18)))
         bottom.addView(timeRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
@@ -851,7 +858,9 @@ class HomePlayerActivity : Activity() {
 
         live = intent.getBooleanExtra("live", false)
         val playerPrefs = getSharedPreferences("home_player", MODE_PRIVATE)
-        frameRate.configure(if (live && intent.hasExtra("tv_afr")) intent.getIntExtra("tv_afr", 1) != 0 else playerPrefs.getBoolean("afr", true), live)
+        val afr = playerPrefs.getBoolean("afr", intent.getIntExtra("tv_afr", 1) != 0)
+        frameRate.configure(afr, live)
+        android.util.Log.i("HomeAFR", "afr_config enabled=$afr live=$live")
         drc.mode = playerPrefs.getInt("drc", 0).coerceIn(0, 2)
         tvNowUrl = intent.getStringExtra("tv_now_url")
         tvDev = intent.getStringExtra("tv_dev") ?: ""
@@ -900,6 +909,7 @@ class HomePlayerActivity : Activity() {
         trackSelector = DefaultTrackSelector(this).apply {
             parameters = buildUponParameters()
                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, noAudio)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .setTunnelingEnabled(tunnel && drc.mode == 0)
                 .setPreferredAudioLanguages("rus", "ru")
                 .setAllowVideoMixedMimeTypeAdaptiveness(true)
@@ -1196,7 +1206,7 @@ class HomePlayerActivity : Activity() {
             val many = player.mediaItemCount > 1
             prevEpBtn.visibility = if (many) View.VISIBLE else View.GONE
             nextEpBtn.visibility = if (many) View.VISIBLE else View.GONE
-            prevEpBtn.text = "⏮ Пред. серия"; nextEpBtn.text = "След. серия ⏭"
+            prevEpBtn.text = "⏮"; nextEpBtn.text = "⏭"
             prevEpBtn.alpha = if (player.hasPreviousMediaItem()) 1f else 0.35f
             nextEpBtn.alpha = if (player.hasNextMediaItem()) 1f else 0.35f
         }
@@ -1685,6 +1695,10 @@ class HomePlayerActivity : Activity() {
             }
         }
         audioBtn.text = "♪ " + audioName.ifBlank { "Звук" }
+        val textOn = !player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) &&
+            player.currentTracks.groups.any { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
+        subsBtn.text = if (textOn) "SUB •" else "SUB"
+        subsBtn.contentDescription = if (textOn) "Субтитры включены" else "Субтитры выключены"
     }
 
     // ---------- управление ----------
@@ -1800,7 +1814,7 @@ class HomePlayerActivity : Activity() {
                     lastSeekKeyAt = now
                     // короткое нажатие — 30 секунд без вызова меню; удержание и быстрые нажатия ускоряют ход
                     val stepMs = when {
-                        seekStreak < 8 -> 30_000L
+                        seekStreak < 8 -> 15_000L
                         seekStreak < 16 -> 60_000L
                         else -> 180_000L
                     }
@@ -1809,7 +1823,7 @@ class HomePlayerActivity : Activity() {
                 }
                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_UP -> { setOverlay(true, true); return true }
             }
-        } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+        } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && (live || currentFocus?.parent?.parent === transportRow)) {
             setOverlay(true); return true
         }
         if (menuMode) {

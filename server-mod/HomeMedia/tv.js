@@ -140,7 +140,7 @@
   var MAXHS = [{ v: 0, n: 'без ограничения (4K)' }, { v: 1080, n: 'до 1080p (FullHD)' }, { v: 720, n: 'до 720p' }];
   function getMaxH() { try { var v = parseInt(localStorage.getItem(MAXH_KEY), 10); return isNaN(v) ? 0 : v; } catch (e) { return 0; } }
   function maxHName() { for (var i = 0; i < MAXHS.length; i++) if (MAXHS[i].v === getMaxH()) return MAXHS[i].n; return getMaxH() + 'p'; }
-  function getAfr() { try { return localStorage.getItem(AFR_KEY) !== '0'; } catch (e) { return true; } }
+  function getAfr() { try { if(window.AndroidJS&&AndroidJS.mcGetAfr)return AndroidJS.mcGetAfr();return localStorage.getItem(AFR_KEY) !== '0'; } catch (e) { return true; } }
   var FONT_KEY = 'tv_font_v1';
   var FONTS = ['Мелкий', 'Средний', 'Крупный'];
   function getFont() { try { var v = parseInt(localStorage.getItem(FONT_KEY), 10); return isNaN(v) ? 0 : v; } catch (e) { return 0; } }
@@ -386,7 +386,7 @@
           noty('Прозрачность списка: ' + getAlpha() + '% (применится при следующем запуске канала)');
           settings(back);
         } else if (a.act === 'afr') {
-          try { localStorage.setItem(AFR_KEY, getAfr() ? '0' : '1'); } catch (e) {}
+          try { var enabled=!getAfr();localStorage.setItem(AFR_KEY,enabled?'1':'0');if(window.AndroidJS&&AndroidJS.mcSetAfr)AndroidJS.mcSetAfr(enabled); } catch (e) {}
           noty('АФР эфира: ' + (getAfr() ? 'включена' : 'выключена') + ' (применится при следующем запуске канала)');
           settings(back);
         } else if (a.act === 'font') {
@@ -936,6 +936,8 @@
           var orig = Lampa.Android.openPlayer;
           Lampa.Android.openPlayer = function (url, data) {
             try {
+              if (window.AndroidJS && AndroidJS.mcSetAfr) AndroidJS.mcSetAfr(getAfr());
+              if (data && typeof data === 'object') data.tv_afr = getAfr() ? 1 : 0;
               if (data && typeof data === 'object' && !data.live && !data.iptv) {
                 var k = titleKey(data);
                 if (k) { data.audio_key = k; registerHashes(data, k); }
@@ -1297,7 +1299,7 @@
     // The profile facade owns native Storage methods; subscribe through its API.
     if(window.HomeStorage)HomeStorage.onChange(changed);
     else proto.setItem=function(key,value){origSet.apply(this,arguments);if(this===localStorage)changed(key,value);};
-    function applyValue(key,value){localStorage.setItem(key,value);}
+    function applyValue(key,value){localStorage.setItem(key,value);if(key===AFR_KEY&&window.AndroidJS&&AndroidJS.mcSetAfr)AndroidJS.mcSetAfr(String(value)!=='0');}
 
     function model() {
       var m = (navigator.userAgent.match(/;\s*([^;)]+?)\s+Build\//) || [])[1];

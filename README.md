@@ -10,7 +10,7 @@
 python3 deploy/deploy-module.py \
   --url http://192.168.1.80:9118 \
   --profile-id u_default \
-  --package release/homemedia-2026.11.01.14.tar.gz
+  --package release/homemedia.tar.gz
 ```
 
 Скрипт получает короткий администраторский сеанс, загружает пакет, ждёт проверку совместимости, запускает штатную замену и ждёт результат. Worker создаёт резервную копию перед заменой; откат выполняется кнопкой `rollback` в панели. Для подготовки без применения используйте `--no-apply`.
@@ -19,10 +19,10 @@ python3 deploy/deploy-module.py \
 
 ## Android
 
-Готовая сборка: `release/LMPC-1.16.11-1129.apk`.
+Готовая сборка: `release/LMPC-1.16.13-1131.apk`.
 
 ```bash
-adb install -r release/LMPC-1.16.11-1129.apk
+adb install -r release/LMPC-1.16.13-1131.apk
 ```
 
 Исходники находятся в `LAMPA/`. Для сборки flavor `mc` требуется JDK 17:
@@ -40,8 +40,8 @@ cd LAMPA
 
 ## Релиз
 
-- HomeMedia: `2026.11.01.15`
-- APK: `1.16.11-mc`, versionCode `1129`
-- SHA-256 APK: `952635cc4b799549107cf40b95d1024aecf15fa9be6f2b7f5bfbc678e6318ebd`
+- HomeMedia: `2026.11.02.2`
+- APK: `1.16.13-mc`, versionCode `1131`
+- SHA-256 APK: `cdfbfc78ab0e06b1639cad9c6603b5d06bc9ded3cea26076bb98b0f9c86a9c72`
 
-Пакет последнего релиза: `release/homemedia-2026.11.01.15.tar.gz`.
+Пакет последнего релиза: `release/homemedia.tar.gz`.
