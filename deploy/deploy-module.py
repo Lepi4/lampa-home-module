@@ -6,7 +6,7 @@ def main():
     ap=argparse.ArgumentParser(description='Deploy HomeMedia through the safe panel updater')
     ap.add_argument('--url', required=True, help='Lampac base URL, for example http://192.168.1.80:9118')
     ap.add_argument('--profile-id', default='u_default'); ap.add_argument('--pin', default='')
-    ap.add_argument('--package', default='../release/homemedia-2026.11.01.14.tar.gz')
+    ap.add_argument('--package', default=str(pathlib.Path(__file__).resolve().parents[1]/'release/homemedia.tar.gz'))
     ap.add_argument('--no-apply', action='store_true'); a=ap.parse_args()
     base=a.url.rstrip('/'); s=requests.Session()
     login=s.post(base+'/home/admin/login',json={'profile_id':a.profile_id,'pin':a.pin,'device':'web_deploy','boot':'deploy-'+str(int(time.time()))},timeout=20);login.raise_for_status();token=login.json().get('token')
