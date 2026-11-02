@@ -523,94 +523,73 @@
   }
 
   // ------------------------------------------------------------------ Proxy connections and independent service routes
-  function renderProxy(box, state) {
-    box.textContent = '';
-    box.appendChild(el('h2', { text: 'Прокси' }));
-    box.appendChild(el('p', { class: 'muted', text: 'Общие настройки сервера для всех устройств. Для каждого сервиса можно выбрать подключение или «Без прокси». Проверка использует выбранные значения без сохранения.' }));
-    if (!state || !state.routes) {
-      box.appendChild(el('p', { text: 'Настройки доступны после входа администратором.' })); return;
-    }
-    var connections = [], routeFields = {}, buttons = [], busy = false;
-    var list = el('div'), routes = el('div'), result = el('p', { class: 'muted', role: 'status', 'aria-live': 'polite' });
-    var names = { tmdb_api: 'TMDB — описания и поиск', tmdb_images: 'TMDB — постеры', kinopub: 'Кинопаб — API и видео', youtube: 'YouTube — поиск и видео', jacred: 'JacRed — поиск раздач' };
-    var selected = Object.assign({}, state.routes);
-    function options() {
-      Object.keys(routeFields).forEach(function (service) {
-        var field = routeFields[service], value = field.value || selected[service] || 'direct';
-        field.textContent = ''; field.appendChild(el('option', { value: 'direct', text: 'Без прокси' }));
-        connections.forEach(function (p) { field.appendChild(el('option', { value: p.id, text: p.name.value || 'Новое подключение' })); });
-        field.value = value;
-      });
-    }
-    function addConnection(p) {
-      var name = el('input', { type: 'text', value: p.name || '', placeholder: 'Название подключения', maxlength: '80', 'aria-label': 'Название прокси' });
-      var address = el('input', { type: 'text', value: p.url || '', placeholder: 'http://адрес:порт или socks5://адрес:порт', autocomplete: 'off', spellcheck: 'false', style: 'min-width:260px;flex:1', 'aria-label': 'Адрес прокси' });
-      var username = el('input', { type: 'text', placeholder: p.has_auth ? 'Логин сохранён' : 'Логин, если нужен', autocomplete: 'off', 'aria-label': 'Новый логин прокси' });
-      var password = el('input', { type: 'password', placeholder: p.has_auth ? 'Пароль сохранён' : 'Пароль, если нужен', autocomplete: 'new-password', 'aria-label': 'Новый пароль прокси' });
-      var clear = el('input', { type: 'checkbox' });
-      var row = el('div', { style: 'border-top:1px solid #333;padding:.8em 0' });
-      var connection = { id: p.id, name: name, address: address, username: username, password: password, clear: clear, row: row };
-      connections.push(connection);
-      var remove = el('button', { text: 'Убрать подключение', onclick: function () {
-        if (busy) return;
-        if (Object.keys(routeFields).some(function (s) { return routeFields[s].value === p.id; })) return toast('Сначала выберите другой маршрут у использующих его сервисов');
-        connections = connections.filter(function (x) { return x !== connection; }); row.remove(); options();
-      } });
-      name.addEventListener('change', options);
-      row.appendChild(el('div', { class: 'row' }, name, address));
-      row.appendChild(el('div', { class: 'row' }, username, password, el('label', {}, clear, ' Удалить логин и пароль'), remove));
-      list.appendChild(row);
-    }
-    (state.connections || []).forEach(addConnection);
-    box.appendChild(list);
-    var add = el('button', { text: 'Добавить подключение', onclick: function () {
-      if (busy) return;
-      if (connections.length >= 12) return toast('Можно сохранить до 12 подключений');
-      addConnection({ id: 'p_' + Date.now().toString(36), name: 'Новый прокси', url: '' }); options();
-    } });
-    box.appendChild(el('div', { class: 'row' }, add));
-    function snapshot() {
-      var body = { revision: state.revision, connections: connections.map(function (p) {
-        return { id: p.id, name: p.name.value, url: p.address.value, username: p.username.value, password: p.password.value, clear_auth: p.clear.checked };
-      }), routes: {} };
-      Object.keys(routeFields).forEach(function (s) { body.routes[s] = routeFields[s].value; }); return body;
-    }
+  function renderProxy(targets, state) {
+    var names = { tmdb_api: 'TMDB — описания и поиск', tmdb_images: 'TMDB — постеры', kinopub: 'Кинопаб', youtube: 'YouTube', jacred: 'JacRed — поиск раздач' };
+    var fields = {}, controls = [], busy = false;
     function error(r) {
-      var key = r.json && r.json.error;
-      return { invalid_proxy_url: 'Проверьте адрес прокси: HTTP, HTTPS или SOCKS5, без пути и параметров.', invalid_connection: 'Проверьте названия подключений.', invalid_route: 'Выберите подключение для каждого сервиса.', username_required: 'Укажите логин для нового пароля.', invalid_credentials: 'Проверьте логин и пароль.', settings_changed: 'Настройки уже изменены в другом окне. Обновите панель.', save_failed: 'Не удалось сохранить. Предыдущие настройки сохранены.', probe_busy: 'Две проверки уже выполняются. Подождите.', admin_required: 'Нужен вход администратора.' }[key] || 'Не удалось выполнить запрос.';
+      return { invalid_proxy_url: 'Введите адрес HTTP, HTTPS или SOCKS5 без пути и параметров.', username_required: 'Укажите логин.', settings_changed: 'Настройки изменились в другом окне. Обновите панель.', admin_required: 'Нужен вход администратора.', probe_busy: 'Подождите завершения другой проверки.' }[r.json && r.json.error] || 'Не удалось выполнить запрос. Проверьте адрес и авторизацию.';
     }
     function post(path, body) { return api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+    function current(service) { return (state.connections || []).filter(function (p) { return p.id === state.routes[service]; })[0]; }
+    function fill(service) {
+      var f = fields[service], p = current(service);
+      f.address.value = p ? p.url : 'Без прокси'; f.username.value = ''; f.password.value = ''; f.clear.checked = false;
+      f.password.placeholder = p && p.has_auth ? 'Пароль сохранён' : 'Пароль, если нужен';
+      f.username.placeholder = p && p.has_auth ? 'Логин сохранён' : 'Логин, если нужен';
+    }
+    function snapshot(service) {
+      var f = fields[service], address = f.address.value.trim();
+      var body = { revision: state.revision, routes: Object.assign({}, state.routes), connections: (state.connections || []).map(function (p) { return Object.assign({}, p); }) };
+      if (!address || /^(без прокси|no proxy|direct)$/i.test(address)) { body.routes[service] = 'direct'; return body; }
+      var id = 'service_' + service;
+      var previous = body.connections.filter(function (p) { return p.id === id && p.url === address; })[0] || body.connections.filter(function (p) { return p.url === address; })[0] || current(service);
+      var item = { id: id, name: names[service], url: address, username: f.username.value, password: f.password.value, clear_auth: f.clear.checked };
+      if (previous) item.auth_from = previous.id;
+      body.connections = body.connections.filter(function (p) { return p.id !== id; }); body.connections.push(item); body.routes[service] = id;
+      body.connections = body.connections.filter(function (p) { return p.id.indexOf('service_') === 0 || Object.keys(body.routes).some(function (s) { return body.routes[s] === p.id; }); });
+      return body;
+    }
+    function setBusy(value) { busy = value; controls.forEach(function (button) { button.disabled = value; }); if (rollback) rollback.disabled = value || !state.can_rollback; }
     Object.keys(names).forEach(function (service) {
-      var field = el('select', { 'aria-label': names[service] }); routeFields[service] = field;
-      var status = el('span', { class: 'muted', role: 'status', 'aria-live': 'polite' });
+      var box = targets[service]; box.textContent = '';
+      if (!state || !state.routes) { box.appendChild(el('p', { class: 'muted', text: 'Настройка прокси доступна администратору.' })); return; }
+      var listId = 'proxy-addresses-' + service;
+      var address = el('input', { type: 'text', list: listId, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Прокси ' + names[service], placeholder: 'Без прокси или адрес: http://… / socks5://…', style: 'min-width:230px;flex:1' });
+      var values = el('datalist', { id: listId });
+      ['Без прокси'].concat((state.connections || []).map(function (p) { return p.url; })).filter(function (v, i, all) { return all.indexOf(v) === i; }).forEach(function (v) { values.appendChild(el('option', { value: v })); });
+      var username = el('input', { type: 'text', autocomplete: 'off', 'aria-label': 'Логин прокси ' + names[service] });
+      var password = el('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'Пароль прокси ' + names[service] });
+      var clear = el('input', { type: 'checkbox' });
+      var status = el('p', { class: 'muted', role: 'status', 'aria-live': 'polite' });
+      fields[service] = { address: address, username: username, password: password, clear: clear };
+      fill(service);
+      var direct = el('button', { text: 'Без прокси', onclick: function () { if (!busy) { address.value = 'Без прокси'; status.textContent = ''; } } });
       var test = el('button', { text: 'Проверить', onclick: function () {
-        var body = snapshot(); body.service = service; test.disabled = true; status.textContent = 'Проверяю…';
-        post('/home/admin/proxy/test', body).then(function (r) {
-          status.textContent = r.ok && r.json ? (r.json.message || error(r)) + (r.json.milliseconds != null ? ' ' + r.json.milliseconds + ' мс' : '') : error(r);
-        }).catch(function () { status.textContent = 'Нет связи с сервером.'; }).then(function () { test.disabled = false; });
+        var body = snapshot(service); body.service = service; setBusy(true); status.textContent = 'Проверяю без сохранения…';
+        post('/home/admin/proxy/test', body).then(function (r) { status.textContent = r.ok && r.json ? r.json.message || error(r) : error(r); })
+          .catch(function () { status.textContent = 'Нет связи с сервером.'; }).then(function () { setBusy(false); });
       } });
-      field.addEventListener('change', function () { status.textContent = ''; });
-      routes.appendChild(el('div', { class: 'row' }, el('label', { text: names[service], style: 'min-width:240px' }), field, test, status)); buttons.push(test);
+      var save = el('button', { class: 'primary', text: 'Сохранить', onclick: function () {
+        var body = snapshot(service); setBusy(true); status.textContent = 'Сохраняю…';
+        post('/home/admin/proxy', body).then(function (r) {
+          if (r.ok && r.json && r.json.ok) { state = r.json; fill(service); status.textContent = r.json.tmdb_reload ? 'Сохранено. TMDB перечитает конфигурацию.' : 'Сохранено'; rollback.disabled = !state.can_rollback; }
+          else status.textContent = error(r);
+        }).catch(function () { status.textContent = 'Нет связи с сервером. Обновите панель для проверки результата.'; }).then(function () { setBusy(false); });
+      } });
+      var auth = el('details', {}, el('summary', { class: 'muted', text: 'Логин и пароль прокси' }), el('div', { class: 'row' }, username, password, el('label', {}, clear, ' Удалить авторизацию')),
+        el('p', { class: 'muted', text: 'Пустые поля сохраняют авторизацию. Для замены укажите новые значения.' }));
+      box.appendChild(el('div', { style: 'border-top:1px solid #333;padding:.7em 0' }, el('label', { text: 'Прокси · ' + names[service] }), el('div', { class: 'row' }, address, values, direct, test, save), auth, status));
+      controls.push(direct, test, save);
     });
-    options(); box.appendChild(routes);
-    function setBusy(value) { busy = value; buttons.concat([add, save, rollback]).forEach(function (b) { b.disabled = value; }); }
-    var save = el('button', { class: 'primary', text: 'Сохранить маршруты', onclick: function () {
-      var body = snapshot(); setBusy(true); result.textContent = 'Сохраняю…';
-      post('/home/admin/proxy', body).then(function (r) {
-        if (r.ok && r.json && r.json.ok) { renderProxy(box, r.json); toast(r.json.tmdb_reload ? 'Сохранено. TMDB применит настройки после перечитывания конфигурации Lampac.' : 'Прокси сохранены'); }
-        else result.textContent = error(r);
-      }).catch(function () { result.textContent = 'Нет связи с сервером. Обновите панель, чтобы проверить результат.'; }).then(function () { setBusy(false); });
-    } });
-    var rollback = el('button', { text: 'Вернуть предыдущие настройки', onclick: function () {
-      if (!state.can_rollback || !confirm('Вернуть предыдущие подключения и маршруты прокси для всех устройств?')) return;
+    if (!state || !state.routes) return;
+    var rollback = el('button', { text: 'Вернуть предыдущие настройки прокси', onclick: function () {
+      if (!state.can_rollback || !confirm('Вернуть предыдущие настройки прокси для всех сервисов?')) return;
       setBusy(true);
-      post('/home/admin/proxy/rollback', { revision: state.revision }).then(function (r) {
-        if (r.ok && r.json && r.json.ok) { renderProxy(box, r.json); toast('Предыдущие настройки возвращены'); } else result.textContent = error(r);
-      }).catch(function () { result.textContent = 'Нет связи с сервером. Проверьте настройки после обновления панели.'; }).then(function () { setBusy(false); });
+      post('/home/admin/proxy/rollback', { revision: state.revision }).then(function (r) { if (r.ok && r.json && r.json.ok) { renderProxy(targets, r.json); toast('Настройки возвращены'); } else toast(error(r)); })
+        .catch(function () { toast('Нет связи с сервером.'); }).then(function () { setBusy(false); });
     } });
     rollback.disabled = !state.can_rollback;
-    box.appendChild(el('div', { class: 'row' }, save, rollback)); box.appendChild(result);
-    box.appendChild(el('p', { class: 'muted', text: 'Сохранённые логины и пароли не выдаются браузеру. Пустые поля сохраняют прежнюю авторизацию. При замене авторизации укажите новый пароль. TMDB использует штатное перечитывание init.conf; остальные сервисы применяют выбор к новым запросам.' }));
+    targets.rollback.textContent = ''; targets.rollback.appendChild(rollback); controls.push(rollback);
   }
 
   // ------------------------------------------------------------------ YouTube: профили и каналы
@@ -764,13 +743,14 @@
       renderPeople(sec('Зрители', 'возраст и привязка к устройству', 'wide'), J(14), devList);
       renderSync(sec('Синхронизация и база', 'единый источник'), J(0) || {});
       renderDevices(sec('Устройства и профили', 'настройки хранятся на сервере', 'wide'), devList);
-      renderOps(sec('Состояние сервера', 'память, копии, источники', 'wide'), J(10));
-      renderKino(sec('Кинопаб', 'привязка и профили'), kpProfiles);
+      var opsBox = sec('Состояние сервера', 'память, копии, источники', 'wide'); renderOps(opsBox, J(10));
+      var kinoBox = sec('Кинопаб', 'привязка и профили'); renderKino(kinoBox, kpProfiles);
       renderImport(sec('Закладки Кинопаба', 'импорт в «Мои фильмы»'), J(11));
-      renderYt(sec('YouTube', 'профили и каналы'), J(12));
-      var proxyBox = sec('Прокси', 'маршруты сервисов', 'wide');
-      api('/home/admin/proxy').then(function (p) { if (document.body.contains(proxyBox)) renderProxy(proxyBox, p.ok ? p.json : null); })
-        .catch(function () { if (document.body.contains(proxyBox)) proxyBox.appendChild(el('p', { text: 'Не удалось загрузить настройки прокси. Обновите панель.' })); });
+      var youtubeBox = sec('YouTube', 'профили и каналы'); renderYt(youtubeBox, J(12));
+      var proxyTargets = {};
+      [['tmdb_api',opsBox],['tmdb_images',opsBox],['jacred',opsBox],['kinopub',kinoBox],['youtube',youtubeBox],['rollback',opsBox]].forEach(function (p) { proxyTargets[p[0]] = el('div'); p[1].appendChild(proxyTargets[p[0]]); });
+      api('/home/admin/proxy').then(function (p) { if (document.body.contains(opsBox)) renderProxy(proxyTargets, p.ok ? p.json : null); })
+        .catch(function () { if (document.body.contains(opsBox)) proxyTargets.rollback.appendChild(el('p', { text: 'Не удалось загрузить настройки прокси. Обновите панель.' })); });
       renderTs(sec('TorrServer', 'адрес для всех устройств'), J(13));
       renderYm(sec('Яндекс.Музыка', 'привязка'), J(4));
       renderLocal(sec('Локальная библиотека', 'Plex и папки'), J(5), J(6));

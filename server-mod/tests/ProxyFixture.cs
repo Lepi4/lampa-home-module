@@ -24,6 +24,10 @@ public class ProxyFixtureController : BaseController
         var credentials = NetworkProxy.Web(url).Credentials.GetCredential(new Uri("http://unit.invalid"), "Basic");
         Check(credentials.UserName == "fixture-user" && credentials.Password == "p@ss:word", "existing auth preserved without double escaping");
         Check(!NetworkProxy.Display(url).Contains("fixture-user") && !NetworkProxy.Display(url).Contains("word"), "display redacted");
+        var separate=(JObject)submitted.DeepClone();separate["connections"][0]["id"]="independent";separate["connections"][0]["auth_from"]="secret";
+        foreach(string service in NetworkProxy.Services)separate["routes"][service]="independent";
+        var clone=NetworkProxy.Validate(separate,fixture);
+        Check(NetworkProxy.Web(NetworkProxy.Resolve(clone,"kinopub")).Credentials.GetCredential(new Uri("http://unit.invalid"),"Basic").Password=="p@ss:word","independent field retains original auth server-side");
         submitted["connections"][0]["password"] = "new:/@ pass";
         checkedConfig = NetworkProxy.Validate(submitted, fixture);
         credentials = NetworkProxy.Web(NetworkProxy.Resolve(checkedConfig, "kinopub")).Credentials.GetCredential(new Uri("http://unit.invalid"), "Basic");

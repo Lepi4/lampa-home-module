@@ -112,6 +112,10 @@ public static class NetworkProxy
                 !new[] { "http", "https", "socks5" }.Contains(uri.Scheme) || uri.Host.Length == 0 || uri.Port < 1 || uri.Port > 65535 ||
                 uri.Query.Length > 0 || uri.Fragment.Length > 0 || uri.AbsolutePath is not ("" or "/")) throw new ArgumentException("invalid_proxy_url");
             var previous = ((JArray)old["connections"]).Children<JObject>().FirstOrDefault(x => (string)x["id"] == id);
+            if (p["auth_from"] != null) {
+                previous = ((JArray)old["connections"]).Children<JObject>().FirstOrDefault(x => (string)x["id"] == (string)p["auth_from"]);
+                if (previous == null) throw new ArgumentException("invalid_auth_source");
+            }
             var builder = new UriBuilder(uri); string username = (string)p["username"] ?? "", password = (string)p["password"] ?? "";
             if (username.Length + password.Length > 1024 || username.Any(char.IsControl) || password.Any(char.IsControl)) throw new ArgumentException("invalid_credentials");
             if ((bool?)p["clear_auth"] == true) { builder.UserName = ""; builder.Password = ""; }
