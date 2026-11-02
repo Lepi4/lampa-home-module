@@ -19,17 +19,17 @@ python3 deploy/deploy-module.py \
 
 ## Android
 
-Готовая сборка: `release/LMPC-1.16.13-1131.apk`.
+Готовая сборка: `release/LMPC-1.16.14-1132.apk`.
 
 ```bash
-adb install -r release/LMPC-1.16.13-1131.apk
+adb install -r release/LMPC-1.16.14-1132.apk
 ```
 
 Исходники находятся в `LAMPA/`. Для сборки flavor `mc` требуется JDK 17:
 
 ```bash
 cd LAMPA
-./gradlew assembleMcRelease
+./gradlew assembleMcRelease -PappVersionCode=1132 -PappVersionName=1.16.14
 ```
 
 Подпись и keystore намеренно не входят в публичный пакет. Не публикуйте `.env`, токены, cookies, базы данных или резервные копии.
@@ -40,8 +40,8 @@ cd LAMPA
 
 ## Релиз
 
-- HomeMedia: `2026.11.02.2`
-- APK: `1.16.13-mc`, versionCode `1131`
-- SHA-256 APK: `cdfbfc78ab0e06b1639cad9c6603b5d06bc9ded3cea26076bb98b0f9c86a9c72`
+- HomeMedia: `2026.11.02.3`
+- APK: `1.16.14-mc`, versionCode `1132`
+- SHA-256 APK: `68dc95d9adcd1ae244698f1ae00e75a2ecea922c42a0b5ada7a12a1501255a61`
 
 Пакет последнего релиза: `release/homemedia.tar.gz`.

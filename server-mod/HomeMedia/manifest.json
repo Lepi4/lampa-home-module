@@ -36,6 +36,7 @@
     "Tools.cs",
     "LastPlay.cs",
     "Alts.cs",
+    "YoutubeReliability.cs",
     "Youtube.cs",
     "DLog.cs",
     "ProfileCatalogPages.cs",

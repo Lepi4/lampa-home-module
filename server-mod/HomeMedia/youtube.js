@@ -36,26 +36,40 @@
   function maxH() { try { var v = parseInt(localStorage.getItem('home_maxh_v1'), 10); return isNaN(v) ? 0 : v; } catch (e) { return 0; } }
 
   // ---------- воспроизведение ----------
+  var pendingPlay = null;
   function play(id, title, remember) {
-    var navigation=window.__mc_nav_id;
-    noty('YouTube: готовлю видео… (первый запуск до 10 секунд)');
+    if (pendingPlay) pendingPlay();
+    var navigation=window.__mc_nav_id, back=ctrl(), stopped=false, request=null, timer=null, watch=null;
     var mh = maxH();
-    api('/yt/video?id=' + encodeURIComponent(id) + '&maxh=' + mh + '&vp9=' + (mh === 0 || mh > 1080), function (d) {
-      if(navigation!==window.__mc_nav_id)return;
-      if (!d || !d.video) return noty('YouTube: видео недоступно');
+    var loading=$('<div style="padding:1em;text-align:center">Подготавливаю видео…<br><small>Проверяю доступные потоки. Назад — отмена.</small></div>');
+    function current(){return !stopped && navigation===window.__mc_nav_id;}
+    function stop(){
+      if(stopped)return;stopped=true;
+      clearTimeout(timer);clearInterval(watch);
+      if(request)request.abort();
+      if(pendingPlay===stop){pendingPlay=null;try{if(loading[0]&&document.body.contains(loading[0])){Lampa.Modal.close();if(Lampa.Controller.enabled().name==='modal')Lampa.Controller.toggle(back);}}catch(e){}}
+    }
+    pendingPlay=stop;
+    Lampa.Modal.open({title:'YouTube',html:loading,size:'medium',onBack:function(){stop();Lampa.Controller.toggle(back);}});
+    watch=setInterval(function(){if(!current())stop();},250);
+    function resolve(attempt){
+    request=api('/yt/video?id=' + encodeURIComponent(id) + '&maxh=' + mh + '&vp9=' + (mh === 0 || mh > 1080), function (d) {
+      if(!current())return;
+      if (!d || !d.video){stop();Lampa.Controller.toggle(back);return noty('YouTube: видео недоступно');}
       var data = {
         url: d.video,
         title: title || d.title || 'YouTube',
         home_player: true,
         home_timeline_only: true // ролик/трейлер не относится к просмотру открытой карточки фильма
       };
-      data.home_youtube_id=d.id;
+      data.home_youtube_id=d.id;data.home_base=BASE;
       if (d.audio) data.yt_audio = d.audio;
-      if (d.quals && d.quals.length > 1) data.yt_quals = JSON.stringify(d.quals);
+      if (d.quals && d.quals.length) data.yt_quals = JSON.stringify(d.quals);
+      else if (d.height > 0) data.yt_quals = JSON.stringify([{h:d.height,v:d.vcodec,url:d.video}]);
       if (d.sponsor && d.sponsor.length) data.yt_skip = JSON.stringify(d.sponsor);
-      var back = ctrl();
       function launch(progress){
-        if(navigation!==window.__mc_nav_id)return;
+        if(!current())return;
+        stop();
         if(window.HomeUser&&remember!==false){
           var hash=String(Lampa.Utils.hash('yt:'+d.id));data.home_base=BASE;data.audio_key='yt_'+d.id;
           data.tl_meta=JSON.stringify([{id:'yt-'+d.id,h:hash,c:'yt_'+d.id}]);
@@ -63,10 +77,18 @@
         }
         try { Lampa.Select.close(); } catch (e) {}
         try { Lampa.Player.play(data); } catch (e) { noty('YouTube: не удалось запустить плеер'); }
-        setTimeout(function () { try { Lampa.Select.close(); } catch (e) {} try { Lampa.Controller.toggle(back); } catch (e) {} }, 700);
+        setTimeout(function () { if(navigation!==window.__mc_nav_id)return;try { Lampa.Select.close(); } catch (e) {} try { Lampa.Controller.toggle(back); } catch (e) {} }, 700);
       }
-      if(window.HomeUser&&remember!==false)api('/home/youtube/progress?id='+encodeURIComponent(d.id),launch,function(){launch(null);},5000);else launch(null);
-    }, function () { noty('YouTube: видео недоступно'); }, 90000);
+      if(window.HomeUser&&remember!==false)request=api('/home/youtube/progress?id='+encodeURIComponent(d.id),launch,function(){launch(null);},5000);else launch(null);
+    }, function (x) {
+      if(!current())return;
+      var d=x&&x.responseJSON||{};
+      if(attempt===0&&(d.error==='network_error'||d.error==='extract_timeout'||d.error==='busy')){timer=setTimeout(function(){if(current())resolve(1);},15000);return;}
+      stop();Lampa.Controller.toggle(back);
+      noty('YouTube: '+(d.message||'не удалось связаться с сервером. Попробуйте ещё раз.'));
+    }, 85000);
+    }
+    resolve(0);
   }
 
   // ---------- профиль (набор каналов) ----------

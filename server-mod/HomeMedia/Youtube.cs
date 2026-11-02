@@ -5,6 +5,7 @@ using Newtonsoft.Json.Linq;
 using Shared;
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -23,7 +24,6 @@ namespace HomeMedia;
 public static class YtStore
 {
     public static readonly string Bin = Environment.GetEnvironmentVariable("HOME_YTDLP") is { Length: > 0 } yb ? yb : "/opt/lampac/yt/yt-dlp";
-    static readonly SemaphoreSlim gate = new(3);
     static bool ready;
 
     public static string Proxy
@@ -56,28 +56,9 @@ public static class YtStore
             ("@k", k), ("@j", v.ToString(Formatting.None)), ("@a", HomeDb.Now() / 1000)));
     }
 
-    // запуск yt-dlp: stdout целиком, лимит по времени, не больше трёх одновременно
+    // Shared, bounded process slots; detailed failures remain available to video resolution.
     public static async Task<string> Run(int timeoutSec, params string[] args)
-    {
-        await gate.WaitAsync();
-        try
-        {
-            var psi = new ProcessStartInfo(Bin) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-            psi.Environment["PYTHONUTF8"] = "1"; psi.Environment["LC_ALL"] = "C.UTF-8"; psi.StandardOutputEncoding = Encoding.UTF8;
-            if (!string.IsNullOrWhiteSpace(Proxy)) { psi.ArgumentList.Add("--proxy"); psi.ArgumentList.Add(Proxy); }
-            psi.ArgumentList.Add("--js-runtimes"); psi.ArgumentList.Add("quickjs"); psi.ArgumentList.Add("--no-warnings"); psi.ArgumentList.Add("--no-cache-dir");
-            foreach (var a in args) psi.ArgumentList.Add(a);
-            using var p = Process.Start(psi);
-            var err = p.StandardError.ReadToEndAsync();
-            var outp = p.StandardOutput.ReadToEndAsync();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
-            try { await p.WaitForExitAsync(cts.Token); }
-            catch { try { p.Kill(true); } catch { } return null; }
-            return p.ExitCode == 0 ? await outp : null;
-        }
-        catch { return null; }
-        finally { gate.Release(); }
-    }
+        => (await YoutubeProcess.Run(Bin, Proxy, timeoutSec, CancellationToken.None, args)).Output;
 
     public static JObject Card(JObject e)
     {
@@ -618,35 +599,60 @@ public static class YtStore
 
     // сведения о ролике: лучший поток в пределах maxh, звук (русский — если есть), сегменты рекламы
     // vp9=true: приставка умеет VP9 — для 1440p/4K, иначе потолок 1080p (H.264)
-    public static async Task<JObject> Video(string id, int maxh, bool vp9, string host)
+    static readonly YoutubeFlights<JObject> videoFlights = new();
+    static string ProxyStamp => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Proxy ?? "")));
+    public static async Task<JObject> VideoInfo(string id, bool force, CancellationToken caller)
     {
-        string key = $"v3:{id}";
-        JObject info = Cached(key, 3600 * 4) as JObject;
-        if (info == null)
-        {
-            var o = await Run(60, "-J", "--no-playlist", $"https://www.youtube.com/watch?v={id}");
-            if (o == null) return null;
-            var d = JObject.Parse(o);
-            var fs = ((JArray)d["formats"]).Children<JObject>()
-                .Where(f => (string)f["protocol"] == "https" && !string.IsNullOrEmpty((string)f["url"]))
-                .Select(f => new JObject
-                {
-                    ["id"] = f["format_id"], ["url"] = f["url"], ["h"] = f["height"], ["w"] = f["width"], ["fps"] = f["fps"],
-                    ["v"] = (string)f["vcodec"] == "none" ? null : (string)f["vcodec"], ["a"] = (string)f["acodec"] == "none" ? null : (string)f["acodec"],
-                    ["lang"] = f["language"], ["abr"] = f["abr"], ["br"] = f["tbr"], ["size"] = f["filesize"] ?? f["filesize_approx"]
-                });
-            info = new JObject
-            {
-                ["id"] = id, ["title"] = d["title"], ["channel"] = d["channel"], ["duration"] = d["duration"], ["live"] = d["is_live"], ["video_id"] = id, ["channel_id"] = d["channel_id"], ["age_limit"] = d["age_limit"],
-                ["formats"] = new JArray(fs)
-            };
-            Put(key, info);
-        }
+        string key = "v3:" + id, route = ProxyStamp;
+        JObject cached = Cached(key, 4 * 3600) as JObject;
+        if (!force && YoutubeLinks.Fresh(cached, route, DateTimeOffset.UtcNow.ToUnixTimeSeconds())) return cached;
+        return await videoFlights.Get(id + ":" + route, async cancel => {
+            if (!force && YoutubeLinks.Fresh(cached = Cached(key, 4 * 3600) as JObject, route, DateTimeOffset.UtcNow.ToUnixTimeSeconds())) return cached;
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancel); budget.CancelAfter(TimeSpan.FromSeconds(70));
+            string failure = "no_stream";
+            // Keep default extraction first. Alternate public clients are bounded fallbacks,
+            // not a proxy change or a Google account login.
+            foreach (string client in new[] { "", "web_embedded", "android_vr" }) {
+                var args = new List<string> { "-J", "--no-playlist" };
+                if (client.Length > 0) { args.Add("--extractor-args"); args.Add("youtube:player_client=" + client); }
+                args.Add("https://www.youtube.com/watch?v=" + id);
+                YoutubeProcess.Result result;
+                try { result = await YoutubeProcess.Run(Bin, Proxy, client == "android_vr" ? 12 : 20, budget.Token, args.ToArray()); }
+                catch (OperationCanceledException) { cancel.ThrowIfCancellationRequested(); throw new YoutubeFailure("extract_timeout"); }
+                failure = result.Error ?? "no_stream";
+                if (result.Output != null) {
+                    try {
+                        var d = JObject.Parse(result.Output);
+                        var fs = ((JArray)d["formats"] ?? new JArray()).Children<JObject>()
+                            .Where(f => (string)f["protocol"] == "https" && !string.IsNullOrEmpty((string)f["url"]))
+                            .Select(f => new JObject {
+                                ["id"] = f["format_id"], ["url"] = f["url"], ["h"] = f["height"], ["w"] = f["width"], ["fps"] = f["fps"],
+                                ["v"] = (string)f["vcodec"] == "none" ? null : (string)f["vcodec"], ["a"] = (string)f["acodec"] == "none" ? null : (string)f["acodec"],
+                                ["lang"] = f["language"], ["abr"] = f["abr"], ["br"] = f["tbr"], ["size"] = f["filesize"] ?? f["filesize_approx"]
+                            });
+                        var info = new JObject {
+                            ["id"] = id, ["title"] = d["title"], ["channel"] = d["channel"], ["duration"] = d["duration"], ["live"] = d["is_live"],
+                            ["video_id"] = id, ["channel_id"] = d["channel_id"], ["age_limit"] = d["age_limit"],
+                            ["formats"] = new JArray(fs), ["proxy_stamp"] = route, ["extraction_client"] = client.Length == 0 ? "default" : client
+                        };
+                        if (((JArray)info["formats"]).Count > 0) { Put(key, info); DLogStore.Server("i", "yt_extract", id, "client=" + info["extraction_client"]); return info; }
+                    } catch (Newtonsoft.Json.JsonException) { failure = "no_stream"; }
+                }
+                DLogStore.Server("w", "yt_extract", id, "client=" + (client.Length == 0 ? "default" : client) + " error=" + failure);
+                if (failure is "unavailable" or "rate_limited" or "busy") break;
+            }
+            throw new YoutubeFailure(failure);
+        }, caller);
+    }
+
+    public static async Task<JObject> Video(string id, int maxh, bool vp9, string host, bool force = false, CancellationToken caller = default)
+    {
+        JObject info = await VideoInfo(id, force, caller);
         if(!await ProfilePolicy.Allows(info))return null;
         var all = ((JArray)info["formats"]).Children<JObject>().ToList();
         var vids = all.Where(f => (string)f["v"] != null && (string)f["a"] == null && (int?)f["h"] > 0).ToList();
         var auds = all.Where(f => (string)f["a"] != null && (string)f["v"] == null).ToList();
-        var prog = all.Where(f => (string)f["a"] != null && (string)f["v"] != null).OrderByDescending(f => (int?)f["h"] ?? 0).FirstOrDefault();
+        var prog = all.Where(f => (string)f["a"] != null && (string)f["v"] != null && (int?)f["h"] <= (maxh > 0 ? maxh : 2160)).OrderByDescending(f => (int?)f["h"] ?? 0).FirstOrDefault();
 
         int cap = maxh > 0 ? maxh : 2160;
         if (!vp9) cap = Math.Min(cap, 1080);
@@ -665,7 +671,7 @@ public static class YtStore
             ["id"] = id, ["title"] = info["title"], ["channel"] = info["channel"], ["duration"] = info["duration"], ["video_id"] = id, ["channel_id"] = info["channel_id"], ["age_limit"] = info["age_limit"],
             ["heights"] = new JArray(vids.Where(Ok).Select(f => (int)f["h"]).Distinct().OrderByDescending(x => x))
         };
-        string P(JObject f) => $"{host}/yt/p?u={Enc((string)f["url"])}";
+        string P(JObject f) => $"{host}/yt/p?id={id}&format={Uri.EscapeDataString((string)f["id"])}&u={Enc((string)f["url"])}";
         if (cand != null && aud != null)
         {
             res["video"] = P(cand); res["audio"] = P(aud); res["height"] = cand["h"]; res["vcodec"] = Codec(cand);
@@ -796,104 +802,73 @@ public class YoutubeController : BaseController
 
     [HttpGet, AllowAnonymous]
     [Route("yt/video")]
-    public async Task<ActionResult> Video(string id = null, int maxh = 0, bool vp9 = false)
+    public async Task<ActionResult> Video(string id = null, int maxh = 0, bool vp9 = false, bool force = false)
     {
         if (!YtStore.ValidId(id)) return Json(new { error = "bad_id" }, 400);
-        var v = await YtStore.Video(id, maxh, vp9, host);
-        return v == null ? Json(new { error = "no_stream" }, 502) : Json(v);
+        try {
+            var v = await YtStore.Video(id, Math.Clamp(maxh, 0, 4320), vp9, host, force, HttpContext.RequestAborted);
+            return v == null ? Json(new { error = "no_stream", message = "У видео нет доступного потока.", retryable = false }, 502) : Json(v);
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested) { return new EmptyResult(); }
+        catch (YoutubeFailure e) { if(e.Retryable || e.Code == "rate_limited")Response.Headers["Retry-After"]="15";return Json(new { error = e.Code, message = e.UserMessage, retryable = e.Retryable }, e.Status); }
     }
 
+    static readonly object clientGate = new();
     static HttpClient proxied;
     static string proxiedFor;
     static HttpClient Client()
     {
-        string p = YtStore.Proxy;
-        if (proxied == null || proxiedFor != p)
-        {
-            proxied = new HttpClient(new SocketsHttpHandler { Proxy = string.IsNullOrWhiteSpace(p) ? null : new WebProxy(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(25), PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = Timeout.InfiniteTimeSpan };
-            proxiedFor = p;
+        lock (clientGate) {
+            string p = YtStore.Proxy;
+            if (proxied == null || proxiedFor != p) {
+                // Existing requests retain their client until complete; new connections use the new route.
+                proxied = new HttpClient(new SocketsHttpHandler { Proxy = string.IsNullOrWhiteSpace(p) ? null : new WebProxy(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(12), PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = Timeout.InfiniteTimeSpan };
+                proxiedFor = p;
+            }
+            return proxied;
         }
-        return proxied;
     }
 
-    const long Chunk = 8 * 1024 * 1024;
-
-    // запрос к googlevideo одним куском: без Range YouTube ограничивает скорость до ~1× битрейта
     static async Task<HttpResponseMessage> Fetch(Uri uri, long from, long to, CancellationToken ct)
     {
-        var req = new HttpRequestMessage(HttpMethod.Get, uri);
+        using var req = new HttpRequestMessage(HttpMethod.Get, uri);
         req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(from, to);
-        req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36");
+        req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36");
         return await Client().SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
     }
+    static bool MediaUri(string url, out Uri uri)
+        => Uri.TryCreate(url, UriKind.Absolute, out uri) && uri.Scheme == "https" &&
+            (uri.Host.EndsWith(".googlevideo.com") || uri.Host.EndsWith(".youtube.com") || uri.Host.EndsWith(".ytimg.com"));
+    static Uri RouteUri(Uri uri) => uri.Host.EndsWith(".googlevideo.com") && uri.AbsolutePath == "/videoplayback" ? new UriBuilder(uri) { Host = "redirector.googlevideo.com" }.Uri : uri;
 
-    // поток googlevideo через сервер: плееру отдаётся цельный диапазон, а у YouTube он берётся кусками по 8 МБ
     [HttpGet, AllowAnonymous]
     [Route("yt/p")]
-    public async Task<ActionResult> Proxy(string u = null)
+    public async Task<ActionResult> Proxy(string u = null, string id = null, string format = null)
     {
         string url;
         try { url = YtStore.Dec(u ?? ""); } catch { return Json(new { error = "bad_u" }, 400); }
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
-            !(uri.Host.EndsWith(".googlevideo.com") || uri.Host.EndsWith(".youtube.com") || uri.Host.EndsWith(".ytimg.com")))
-            return Json(new { error = "bad_host" }, 400);
-        // кэш-узел из ссылки (rrN---sn-…) из выхода прокси часто недоступен; через redirector YouTube сам выберет достижимый
-        if (uri.Host.EndsWith(".googlevideo.com") && uri.AbsolutePath == "/videoplayback")
-            uri = new UriBuilder(uri) { Host = "redirector.googlevideo.com" }.Uri;
-
-        long start = 0; long? end = null; bool ranged = false;
-        var rm = Regex.Match(Request.Headers["Range"].FirstOrDefault() ?? "", @"bytes=(\d+)-(\d*)");
-        if (rm.Success) { ranged = true; start = long.Parse(rm.Groups[1].Value); if (rm.Groups[2].Value.Length > 0) end = long.Parse(rm.Groups[2].Value); }
-        var ct = HttpContext.RequestAborted;
-        try
-        {
-            long next = start;
-            long last = end ?? long.MaxValue;
-            bool started = false;
-            while (next <= last)
-            {
-                long to = Math.Min(next + Chunk - 1, last);
-                using var r = await Fetch(uri, next, to, ct);
-                if (!started)
-                {
-                    if (!r.IsSuccessStatusCode && (int)r.StatusCode != 206)
-                    {
-                        Response.StatusCode = (int)r.StatusCode;
-                        return new EmptyResult();
-                    }
-                    long total = r.Content.Headers.ContentRange?.Length ?? -1;
-                    if (total > 0) last = Math.Min(last, total - 1);
-                    Response.StatusCode = ranged ? 206 : 200;
-                    if (r.Content.Headers.ContentType != null) Response.ContentType = r.Content.Headers.ContentType.ToString();
-                    if (last != long.MaxValue)
-                    {
-                        Response.ContentLength = last - start + 1;
-                        if (ranged && total > 0) Response.Headers["Content-Range"] = $"bytes {start}-{last}/{total}";
-                    }
-                    Response.Headers["Accept-Ranges"] = "bytes";
-                    started = true;
+        if (!MediaUri(url, out var uri)) return Json(new { error = "bad_host" }, 400);
+        if (!uri.Host.EndsWith(".googlevideo.com") || uri.AbsolutePath != "/videoplayback") {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(HttpContext.RequestAborted); timeout.CancelAfter(TimeSpan.FromSeconds(25));
+            try {
+                using var req = new HttpRequestMessage(HttpMethod.Get, uri);
+                using var response = await Client().SendAsync(req, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                Response.StatusCode = (int)response.StatusCode;
+                if (response.IsSuccessStatusCode) {
+                    Response.ContentType = response.Content.Headers.ContentType?.ToString();Response.ContentLength=response.Content.Headers.ContentLength;
+                    await response.Content.CopyToAsync(Response.Body, timeout.Token);
                 }
-                long got = 0;
-                await using (var s = await r.Content.ReadAsStreamAsync())
-                {
-                    var buf = new byte[81920];
-                    int n;
-                    while ((n = await s.ReadAsync(buf, 0, buf.Length, ct)) > 0)
-                    {
-                        if (next + got + n - 1 > last) n = (int)(last - (next + got) + 1);
-                        await Response.Body.WriteAsync(buf, 0, n, ct);
-                        got += n;
-                        if (next + got > last) break;
-                    }
-                }
-                if (got == 0) break;
-                next += got;
-            }
+            } catch { if(Response.HasStarted)HttpContext.Abort();else Response.StatusCode=502; }
+            return new EmptyResult();
         }
-        catch (Exception ex)
-        {
-            if (!Response.HasStarted) return Json(new { error = ex.GetType().Name + ": " + ex.Message }, 502);
+        async Task<Uri> Renew(CancellationToken ct) {
+            var info = await YtStore.VideoInfo(id, true, ct);
+            var f = ((JArray)info["formats"]).Children<JObject>().FirstOrDefault(f => (string)f["id"] == format);
+            if (!MediaUri((string)f?["url"], out var fresh)) throw new YoutubeFailure("no_stream");
+            return RouteUri(fresh);
         }
+        bool canRenew = YtStore.ValidId(id) && Regex.IsMatch(format ?? "", @"^[0-9A-Za-z_.-]{1,80}$");
+        await new YoutubeRelay(Fetch, canRenew ? Renew : null).Send(HttpContext, RouteUri(uri));
         return new EmptyResult();
     }
 

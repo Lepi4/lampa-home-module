@@ -1,11 +1,11 @@
 {
-  "homemedia": "2026.11.01.15",
+  "homemedia": "2026.11.02.3",
   "apk": {
-    "versionName": "1.16.11-mc",
-    "versionCode": 1129,
-    "file": "release/LMPC-1.16.11-1129.apk",
-    "sha256": "952635cc4b799549107cf40b95d1024aecf15fa9be6f2b7f5bfbc678e6318ebd"
+    "versionName": "1.16.14-mc",
+    "versionCode": 1132,
+    "file": "release/LMPC-1.16.14-1132.apk",
+    "sha256": "68dc95d9adcd1ae244698f1ae00e75a2ecea922c42a0b5ada7a12a1501255a61"
   },
   "install": "deploy/deploy-module.py",
-  "package": "release/homemedia-2026.11.01.15.tar.gz"
+  "package": "release/homemedia.tar.gz"
 }

@@ -302,6 +302,70 @@ class HomePlayerActivity : Activity() {
     private var ytQuals: List<Triple<Int, String, String>> = emptyList()
     private var ytAudioUrl = ""
     private var ytVideoUrl = ""
+    private var ytRefreshing = false
+    private var ytRefreshEpoch = 0
+    private var ytRefreshAttempts = 0
+    private var ytRefreshWindow = 0L
+    private var ytForeground = false
+    @Volatile private var ytRefreshConnection: HttpURLConnection? = null
+
+    private fun refreshYoutube(): Boolean {
+        val id = intent.getStringExtra("home_youtube_id").orEmpty()
+        if (live || homeBase.isBlank() || !id.matches(Regex("[A-Za-z0-9_-]{11}"))) return false
+        if (ytRefreshing) return true
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - ytRefreshWindow > 120_000) { ytRefreshWindow = now; ytRefreshAttempts = 0 }
+        if (ytRefreshAttempts >= 2) return false
+        ytRefreshAttempts++; ytRefreshing = true
+        val epoch = ++ytRefreshEpoch
+        val position = player.currentPosition.coerceAtLeast(0)
+        val resume = player.playWhenReady
+        val metadata = player.currentMediaItem?.mediaMetadata
+        val height = ytQuals.firstOrNull { it.third == ytVideoUrl }?.first ?: 1080
+        val vp9 = ytQuals.any { it.second == "vp9" || it.second == "vp09" }
+        statusView.text = "YouTube: восстанавливаю соединение…"
+        showSpinner(true)
+        DLog.log("w", "yt_refresh", id, "attempt=$ytRefreshAttempts")
+        Thread {
+            var result: JSONObject? = null
+            var message = "YouTube: не удалось восстановить соединение. Запустите видео ещё раз."
+            try {
+                val connection = homeConnection("$homeBase/yt/video?id=$id&maxh=$height&vp9=$vp9&force=true")
+                ytRefreshConnection = connection
+                try {
+                    connection.connectTimeout = 5000; connection.readTimeout = 85_000
+                    val ok = connection.responseCode == 200
+                    val body = (if (ok) connection.inputStream else connection.errorStream)?.bufferedReader()?.use { it.readText() }
+                    val data = JSONObject(body ?: "{}")
+                    if (ok && data.optString("video").isNotBlank()) result = data
+                    else if (data.optString("message").isNotBlank()) message = "YouTube: " + data.optString("message")
+                } finally { connection.disconnect(); ytRefreshConnection = null }
+            } catch (_: Exception) { }
+            ui.post {
+                if (finished || epoch != ytRefreshEpoch || isDestroyed) return@post
+                ytRefreshing = false
+                val data = result
+                if (data == null) {
+                    errored = true
+                    DLog.log("e", "yt_refresh_failed", id, "attempt=$ytRefreshAttempts")
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                    closePlayer(); return@post
+                }
+                ytVideoUrl = data.getString("video"); ytAudioUrl = data.optString("audio")
+                val qualities = data.optJSONArray("quals") ?: JSONArray()
+                ytQuals = (0 until qualities.length()).map { qualities.getJSONObject(it).let { q -> Triple(q.getInt("h"), q.optString("v"), q.getString("url")) } }
+                val item = MediaItem.Builder().setUri(ytVideoUrl).apply { if (metadata != null) setMediaMetadata(metadata) }.build()
+                val http = DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setConnectTimeoutMs(15_000).setReadTimeoutMs(30_000)
+                val factory = ProgressiveMediaSource.Factory(http)
+                val source = factory.createMediaSource(item)
+                if (ytAudioUrl.isBlank()) player.setMediaSource(source, position)
+                else player.setMediaSource(MergingMediaSource(source, factory.createMediaSource(MediaItem.fromUri(ytAudioUrl))), position)
+                player.prepare(); player.playWhenReady = resume && ytForeground
+                DLog.log("i", "yt_refresh_ready", id, "position=$position height=${data.optInt("height")}")
+            }
+        }.start()
+        return true
+    }
 
     private fun pickYtQuality() {
         val names = ytQuals.map { "${it.first}p · ${if (it.second == "avc1") "H.264" else "VP9"}" }
@@ -1106,6 +1170,7 @@ class HomePlayerActivity : Activity() {
                     DLog.log("w", "live_retry", error.errorCodeName, "attempt=${liveRetries + 1} buffer=${player.totalBufferedDuration}")
                     reconnect(); return
                 }
+                if (error.errorCode in 2000..2999 && refreshYoutube()) return
                 val decoderIssue = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                     error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
                     error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES
@@ -2156,6 +2221,8 @@ class HomePlayerActivity : Activity() {
     private fun closePlayer() {
         if (finished) return
         finished = true
+        ytRefreshEpoch++
+        ytRefreshConnection?.disconnect()
         updateBufferIndicator(Player.STATE_IDLE)
         ui.removeCallbacksAndMessages(null)
         val res = Intent(RESULT_ACTION)
@@ -2213,6 +2280,7 @@ class HomePlayerActivity : Activity() {
     }
 
     override fun onStop() {
+        ytForeground = false
         channelOk.cancel()
         liveOk.cancel()
         ui.removeCallbacks(closeChannels)
@@ -2232,6 +2300,7 @@ class HomePlayerActivity : Activity() {
     // после сна приставки декодер и поверхность часто «залипают» на последнем кадре: в эфире пересоздаём плеер заново
     override fun onStart() {
         super.onStart()
+        ytForeground = true
         if (live && !finished && ::player.isInitialized && stoppedAt > 0L) {
             val idx = player.currentMediaItemIndex.coerceIn(0, (chUris.size - 1).coerceAtLeast(0))
             stoppedAt = 0L
@@ -2247,6 +2316,8 @@ class HomePlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ytRefreshEpoch++
+        ytRefreshConnection?.disconnect()
         ui.removeCallbacksAndMessages(null)
         if (top.rootu.lampa.RemindWatcher.videoPlayer?.get() === this) top.rootu.lampa.RemindWatcher.videoPlayer = null
         if (::player.isInitialized && !finished) player.release()
