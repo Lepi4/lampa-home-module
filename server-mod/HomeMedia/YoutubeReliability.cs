@@ -79,7 +79,8 @@ public static class YoutubeProcess
         try {
             var psi = new ProcessStartInfo(bin) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, StandardOutputEncoding = Encoding.UTF8 };
             psi.Environment["PYTHONUTF8"] = "1"; psi.Environment["LC_ALL"] = "C.UTF-8";
-            if (!string.IsNullOrWhiteSpace(proxy)) { psi.ArgumentList.Add("--proxy"); psi.ArgumentList.Add(proxy); }
+            // An explicit empty value disables yt-dlp's environment/config proxy too.
+            psi.ArgumentList.Add("--proxy"); psi.ArgumentList.Add(proxy ?? "");
             foreach (var a in new[] { "--js-runtimes", "quickjs", "--no-warnings", "--no-cache-dir", "--socket-timeout", "10", "--retries", "0", "--extractor-retries", "0" }) psi.ArgumentList.Add(a);
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var process = Process.Start(psi);

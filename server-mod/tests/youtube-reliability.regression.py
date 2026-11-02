@@ -12,7 +12,7 @@ p.add_argument('--ct',default=116,type=int)
 a=p.parse_args()
 bundle=io.BytesIO()
 with tarfile.open(fileobj=bundle,mode='w:gz') as archive:
-    files={f'payload/{n}':(ROOT/'server-mod/HomeMedia'/n).read_bytes() for n in ['Youtube.cs','YoutubeReliability.cs','manifest.json']}
+    files={f'payload/{n}':(ROOT/'server-mod/HomeMedia'/n).read_bytes() for n in ['Youtube.cs','YoutubeReliability.cs','NetworkProxy.cs','ServiceUi.cs','manifest.json']}
     manifest=json.loads(files['payload/manifest.json'])
     manifest['tree'].append('YoutubeReliabilityFixture.cs')
     files['payload/manifest.json']=json.dumps(manifest).encode()

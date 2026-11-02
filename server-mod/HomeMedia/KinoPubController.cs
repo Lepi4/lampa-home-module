@@ -141,7 +141,7 @@ public static class KpStore
 
     public static HttpClient Client()
     {
-        string proxy = (string)Load()["proxy"] ?? "";
+        string proxy = NetworkProxy.Route("kinopub", (string)Load()["proxy"] ?? "");
         lock (clients)
         {
             if (clients.TryGetValue(proxy, out var c))
@@ -151,18 +151,12 @@ public static class KpStore
             {
                 AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
                 ConnectTimeout = TimeSpan.FromSeconds(6),
+                UseProxy = false,
             };
 
             if (!string.IsNullOrWhiteSpace(proxy))
             {
-                var u = new Uri(proxy);
-                var wp = new WebProxy(new Uri($"{u.Scheme}://{u.Host}:{u.Port}"));
-                if (!string.IsNullOrEmpty(u.UserInfo))
-                {
-                    var ui = u.UserInfo.Split(':', 2);
-                    wp.Credentials = new NetworkCredential(Uri.UnescapeDataString(ui[0]), ui.Length > 1 ? Uri.UnescapeDataString(ui[1]) : "");
-                }
-                h.Proxy = wp;
+                h.Proxy = NetworkProxy.Web(proxy);
                 h.UseProxy = true;
             }
 

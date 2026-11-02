@@ -27,6 +27,8 @@
     "AnimeGo.cs",
     "Panel.cs",
     "ServiceControl.cs",
+    "NetworkProxy.cs",
+    "ServiceUi.cs",
     "Ops.cs",
     "TcWatch.cs",
     "TlV2.cs",

@@ -20,7 +20,21 @@ namespace HomeMedia;
 // Источники — kinopub.json, ключ search_hosts: [{ "host": "...", "apikey": "...", "enable": true }].
 public class KpSearchController : BaseController
 {
-    static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(7) };
+    static readonly object clientGate = new();
+    static HttpClient client;
+    static string clientFor;
+    static HttpClient Client()
+    {
+        lock (clientGate) {
+            string proxy = NetworkProxy.Route("jacred", "");
+            if (client == null || clientFor != proxy) {
+                client = new HttpClient(new SocketsHttpHandler { Proxy = NetworkProxy.Web(proxy), UseProxy = proxy.Length > 0,
+                    ConnectTimeout = TimeSpan.FromSeconds(4), PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(7) };
+                clientFor = proxy;
+            }
+            return client;
+        }
+    }
     static readonly Regex Btih = new("btih:([0-9a-fA-F]{40}|[A-Za-z2-7]{32})", RegexOptions.Compiled);
 
     static readonly Dictionary<string, string> LastStatus = new();
@@ -66,6 +80,7 @@ public class KpSearchController : BaseController
         var hosts = Hosts().Children<JObject>().Where(h => (bool?)h["enable"] != false && !string.IsNullOrEmpty((string)h["host"])).ToList();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(7));
+        var http = Client();
 
         var tasks = hosts.Select(async h =>
         {
@@ -77,7 +92,7 @@ public class KpSearchController : BaseController
                 string key = (string)h["apikey"];
                 if (!string.IsNullOrEmpty(key)) url += "&apikey=" + Uri.EscapeDataString(key);
 
-                string body = await Http.GetStringAsync(url, cts.Token);
+                string body = await http.GetStringAsync(url, cts.Token);
                 var arr = JObject.Parse(body)["Results"] as JArray ?? new JArray();
                 lock (LastStatus) LastStatus[host] = $"ok {arr.Count} за {sw.ElapsedMilliseconds} мс";
                 return arr.Children<JObject>().ToList();

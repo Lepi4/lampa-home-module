@@ -28,7 +28,7 @@ public static class YtStore
 
     public static string Proxy
     {
-        get { var p = HomeDb.Get("yt_proxy"); return string.IsNullOrWhiteSpace(p) ? (Environment.GetEnvironmentVariable("HOME_YT_PROXY") ?? "") : p; }   // пусто — прямое подключение
+        get { var p = HomeDb.Get("yt_proxy"); return NetworkProxy.Route("youtube", string.IsNullOrWhiteSpace(p) ? Environment.GetEnvironmentVariable("HOME_YT_PROXY") : p); }
     }
 
     static void Ensure()
@@ -86,7 +86,7 @@ public static class YtStore
             string p = Proxy;
             if (pageClient == null || pageFor != p)
             {
-                pageClient = new HttpClient(new SocketsHttpHandler { Proxy = string.IsNullOrWhiteSpace(p) ? null : new WebProxy(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(8) }) { Timeout = TimeSpan.FromSeconds(20) };
+                pageClient = new HttpClient(new SocketsHttpHandler { Proxy = NetworkProxy.Web(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(8) }) { Timeout = TimeSpan.FromSeconds(20) };
                 pageFor = p;
             }
             var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -439,7 +439,7 @@ public static class YtStore
             string p = Proxy;
             if (rssClient == null || rssFor != p)
             {
-                rssClient = new HttpClient(new SocketsHttpHandler { Proxy = string.IsNullOrWhiteSpace(p) ? null : new WebProxy(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(8) }) { Timeout = TimeSpan.FromSeconds(15) };
+                rssClient = new HttpClient(new SocketsHttpHandler { Proxy = NetworkProxy.Web(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(8) }) { Timeout = TimeSpan.FromSeconds(15) };
                 rssFor = p;
             }
             string xml = await rssClient.GetStringAsync($"https://www.youtube.com/feeds/videos.xml?channel_id={ch}");
@@ -698,7 +698,7 @@ public static class YtStore
         if (Cached(key, 86400) is JArray c) return c;
         try
         {
-            using var h = new HttpClient(new SocketsHttpHandler { Proxy = string.IsNullOrWhiteSpace(Proxy) ? null : new WebProxy(Proxy), UseProxy = !string.IsNullOrWhiteSpace(Proxy), ConnectTimeout = TimeSpan.FromSeconds(6) }) { Timeout = TimeSpan.FromSeconds(8) };
+            using var h = new HttpClient(new SocketsHttpHandler { Proxy = NetworkProxy.Web(Proxy), UseProxy = !string.IsNullOrWhiteSpace(Proxy), ConnectTimeout = TimeSpan.FromSeconds(6) }) { Timeout = TimeSpan.FromSeconds(8) };
             string cats = Uri.EscapeDataString("[\"sponsor\",\"selfpromo\",\"interaction\",\"intro\",\"outro\"]");
             var r = await h.GetAsync($"https://sponsor.ajay.app/api/skipSegments?videoID={id}&categories={cats}&actionTypes=%5B%22skip%22%5D");
             var arr = new JArray();
@@ -822,7 +822,7 @@ public class YoutubeController : BaseController
             string p = YtStore.Proxy;
             if (proxied == null || proxiedFor != p) {
                 // Existing requests retain their client until complete; new connections use the new route.
-                proxied = new HttpClient(new SocketsHttpHandler { Proxy = string.IsNullOrWhiteSpace(p) ? null : new WebProxy(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(12), PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = Timeout.InfiniteTimeSpan };
+                proxied = new HttpClient(new SocketsHttpHandler { Proxy = NetworkProxy.Web(p), UseProxy = !string.IsNullOrWhiteSpace(p), ConnectTimeout = TimeSpan.FromSeconds(12), PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = Timeout.InfiniteTimeSpan };
                 proxiedFor = p;
             }
             return proxied;
@@ -1026,6 +1026,6 @@ public class YoutubeController : BaseController
     public async Task<ActionResult> Status()
     {
         string ver = (await YtStore.Run(15, "--version"))?.Trim();
-        return Json(new { ytdlp = ver, proxy = YtStore.Proxy });
+        return Json(new { ytdlp = ver, proxy = NetworkProxy.Display(YtStore.Proxy) });
     }
 }
