@@ -1,4 +1,4 @@
-import copy, hashlib, io, json, pathlib, sys, tempfile, unittest
+import copy, hashlib, io, json, pathlib, sys, tempfile, unittest, urllib.error
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -33,6 +33,55 @@ class Sources(unittest.TestCase):
         self.assertEqual(result['provider'], 'gitverse')
         self.assertIn('/raw/commit/' + 'a' * 40 + '/', result['url'])
         self.assertEqual(self.requests, ['https://gitverse.ru/api/repos/Lepi4/lampa-home-module/raw/branch/master/module-release.json'])
+
+    def mirrored(self):
+        return dict(self.source, mirrors=[dict(self.source, provider='github', manifest='module-release.json')])
+
+    def test_metadata_network_failure_uses_github_manifest(self):
+        def opener(request):
+            if 'gitverse.ru/' in request.full_url:
+                raise urllib.error.URLError('offline')
+            return io.BytesIO(json.dumps(self.manifest).encode())
+        result = sources.discover_apk(self.mirrored(), opener)
+        self.assertEqual(result['provider'], 'github')
+        self.assertIn('raw.githubusercontent.com/Lepi4/lampa-home-module/' + 'a'*40, result['url'])
+
+    def test_invalid_primary_does_not_hide_error_with_mirror(self):
+        self.manifest['artifact_ref'] = 'bad'
+        with self.assertRaisesRegex(RuntimeError, 'artifact_commit_required'):
+            sources.discover_apk(self.mirrored(), self.opener)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_artifact_network_failure_retries_identical_commit(self):
+        calls = []
+        def opener(request):
+            calls.append(request.full_url)
+            if request.full_url.endswith('module-release.json'):
+                return io.BytesIO(json.dumps(self.manifest).encode())
+            if 'gitverse.ru/' in request.full_url:
+                raise urllib.error.URLError('offline')
+            self.assertIn('/' + 'a'*40 + '/' + self.asset['file'], request.full_url)
+            return io.BytesIO(self.data)
+        with tempfile.TemporaryDirectory() as root:
+            result = apk_sync.sync(root, self.mirrored(), opener)
+            self.assertTrue(result['updated'])
+            self.assertEqual(len(calls), 3)
+            self.assertIn('raw.githubusercontent.com', json.loads((pathlib.Path(root)/'latest.json').read_text())['download_url'])
+
+    def test_corrupt_primary_artifact_does_not_try_mirror(self):
+        self.asset['sha256'] = '0'*64
+        with tempfile.TemporaryDirectory() as root, self.assertRaisesRegex(RuntimeError, 'checksum'):
+            apk_sync.sync(root, self.mirrored(), self.opener)
+        self.assertEqual(len(self.requests), 2)
+
+    def test_both_sources_offline_preserve_current_apk(self):
+        def offline(request):
+            raise urllib.error.URLError('offline')
+        with tempfile.TemporaryDirectory() as root:
+            current = pathlib.Path(root)/'latest.json';current.write_text('{"version_code":1132}')
+            with self.assertRaises(urllib.error.URLError):
+                apk_sync.sync(root, self.mirrored(), offline)
+            self.assertEqual(current.read_text(), '{"version_code":1132}')
 
     def test_module_uses_its_own_version_and_checksum(self):
         result = sources.discover_component(dict(self.source, asset='homemedia.tar.gz'), 'homemedia', self.opener)

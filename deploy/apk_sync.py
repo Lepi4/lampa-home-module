@@ -66,22 +66,8 @@ def sync(root, source, opener=fetch):
     fd, name = tempfile.mkstemp(prefix=release['name'] + '.', suffix='.part', dir=root)
     os.close(fd)
     temp = pathlib.Path(name)
-    h = hashlib.sha256()
-    total = 0
     try:
-        request = urllib.request.Request(release['url'], headers={'User-Agent': 'LMPC-APK-Sync'})
-        with opener(request) as response, temp.open('wb') as output:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > release['bytes']:
-                    raise RuntimeError('apk_size_overrun')
-                h.update(chunk)
-                output.write(chunk)
-        if total != release['bytes'] or h.hexdigest() != release['sha256']:
-            raise RuntimeError('apk_checksum_mismatch')
+        manifest['download_url'] = release_sources.download(release, temp, opener, max_bytes=150_000_000)
         if target.exists():
             if hashlib.sha256(target.read_bytes()).hexdigest() != release['sha256']:
                 raise RuntimeError('immutable_release_conflict')

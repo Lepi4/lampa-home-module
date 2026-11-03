@@ -12,12 +12,16 @@ import subprocess
 import tarfile
 
 
-def publish(repo, component, version, package, apk=None, sdk=None, push=False):
+def publish(repo, component, version, package, apk=None, sdk=None, push=False, mirror_github=True):
     def git(*args):
         return subprocess.check_output(['git', '-C', str(repo), *args], text=True, encoding='utf-8').strip()
     assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,99}', version), 'invalid_version'
     assert not git('status', '--porcelain'), 'commit_reviewed_source_changes_first'
     assert re.fullmatch(r'(git@gitverse\.ru:|https://gitverse\.ru/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git', git('remote', 'get-url', 'origin')), 'origin_must_be_gitverse'
+    if mirror_github and push:
+        name = re.split(r'[:/]', git('remote', 'get-url', 'origin'))[-2:]
+        expected = '/'.join(name)
+        assert git('remote', 'get-url', 'github') in ('https://github.com/' + expected, 'git@github.com:' + expected), 'wrong_github_mirror'
     branch = git('branch', '--show-current'); assert branch
     tag = 'gitverse-' + version
     assert not git('tag', '--list', tag), 'version_tag_already_exists'
@@ -68,6 +72,12 @@ def publish(repo, component, version, package, apk=None, sdk=None, push=False):
     git('tag', '-a', tag, '-m', component + ' ' + version)
     if push:
         git('push', 'origin', branch, tag)
+        if mirror_github:
+            # Fast-forward only. Never overwrite independent mirror changes.
+            try:
+                git('push', 'github', branch, tag)
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError('GitVerse published successfully; GitHub mirror push failed. Retry git push github ' + branch + ' ' + tag) from error
     print(json.dumps({'repo': str(repo), 'version': version, 'artifact_ref': artifact_ref, 'manifest_commit': git('rev-parse', 'HEAD'), 'pushed': push}))
 
 
@@ -80,5 +90,6 @@ if __name__ == '__main__':
     p.add_argument('--apk', type=pathlib.Path)
     p.add_argument('--sdk', type=pathlib.Path, default=os.environ.get('ANDROID_HOME'))
     p.add_argument('--push', action='store_true')
+    p.add_argument('--no-github-mirror', dest='mirror_github', action='store_false', help='Skip the default push to the github mirror')
     a = p.parse_args()
-    publish(a.repo.resolve(), a.component, a.version, a.package, a.apk, a.sdk, a.push)
+    publish(a.repo.resolve(), a.component, a.version, a.package, a.apk, a.sdk, a.push, a.mirror_github)

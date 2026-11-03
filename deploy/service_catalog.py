@@ -49,7 +49,7 @@ def discover(c,force=False):
  key=release_sources.source_key(src)
  if not force and time.time()-d.get('checked',0)<900 and d.get('source_key',key)==key:return d
  release=release_sources.discover_component(src,c['id'],lambda request:fetch(c,request))
- d.update(checked=time.time(),latest=release['version'],download=release['url'],digest=release['sha256'],bytes=release['bytes'],source_key=key,source=release['provider'])
+ d.update(checked=time.time(),latest=release['version'],download=release['url'],download_urls=release['urls'],digest=release['sha256'],bytes=release['bytes'],source_key=key,source=release['provider'])
  d.pop('error',None)
  save(c,d);return d
 
@@ -138,16 +138,8 @@ def _prepare(c):
  raw=downloads/d['digest'];partial=folder/'download.part'
  valid=raw.is_file() and raw.stat().st_size==d['bytes'] and hashlib.sha256(raw.read_bytes()).hexdigest()==d['digest']
  if not valid:
-  h=hashlib.sha256();size=0;deadline=time.monotonic()+600
-  with fetch(c,urllib.request.Request(d['download'],headers={'User-Agent':'LMPC-Updater'}),timeout=30) as response,partial.open('wb') as dest:
-   while True:
-    if time.monotonic()>deadline:raise RuntimeError('download_deadline_exceeded')
-    chunk=response.read(1024*1024)
-    if not chunk:break
-    size+=len(chunk)
-    if size>d['bytes'] or size>1024**3:raise RuntimeError('download_size_mismatch')
-    dest.write(chunk);h.update(chunk)
-  if size!=d['bytes'] or h.hexdigest()!=d['digest']:raise RuntimeError('upstream_checksum_mismatch')
+  release={'url':d['download'],'urls':d.get('download_urls'),'bytes':d['bytes'],'sha256':d['digest']}
+  release_sources.download(release,partial,lambda request:fetch(c,request,timeout=30))
   os.replace(partial,raw)
  # Keep at most two validated upstream downloads; prepared packages are separate.
  for obsolete in sorted(downloads.iterdir(),key=lambda p:p.stat().st_mtime,reverse=True)[2:]:

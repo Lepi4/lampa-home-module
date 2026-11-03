@@ -9,6 +9,8 @@ import pathlib
 import re
 import urllib.parse
 import urllib.request
+import urllib.error
+import time
 
 APK_NAME = re.compile(r'^LMPC-([A-Za-z0-9.-]+)-(\d+)\.apk$')
 
@@ -34,6 +36,7 @@ def artifact_path(value):
 
 def raw_url(source, path, commit=None):
     repo = repo_name(source)
+    provider = source.get('provider', 'github')
     if commit is not None:
         if not isinstance(commit, str) or not re.fullmatch(r'[0-9a-f]{40}', commit):
             raise RuntimeError('artifact_commit_required')
@@ -43,15 +46,19 @@ def raw_url(source, path, commit=None):
         if not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*', branch):
             raise RuntimeError('invalid_release_branch')
         selector = 'branch/' + branch
+    if provider == 'github':
+        return 'https://raw.githubusercontent.com/' + repo + '/' + (commit or branch) + '/' + path
+    if provider != 'gitverse':
+        raise RuntimeError('unsupported_release_provider')
     return 'https://gitverse.ru/api/repos/' + repo + '/raw/' + selector + '/' + path
 
 
 def get_json(source, fetch):
     provider = source.get('provider', 'github')
-    if provider == 'github':
+    if provider == 'github' and not source.get('manifest'):
         url = 'https://api.github.com/repos/' + repo_name(source) + '/releases/latest'
         accept = 'application/vnd.github+json'
-    elif provider == 'gitverse':
+    elif provider in ('gitverse', 'github'):
         path = source.get('manifest', 'module-release.json')
         if not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*\.json', path):
             raise RuntimeError('invalid_release_manifest')
@@ -72,7 +79,7 @@ def get_json(source, fetch):
 
 def normalize(source, manifest, asset, version):
     provider = source.get('provider', 'github')
-    if provider == 'gitverse':
+    if provider == 'gitverse' or source.get('manifest'):
         path = artifact_path(asset.get('file'))
         commit = manifest.get('artifact_ref')
         if not isinstance(commit, str) or not re.fullmatch(r'[0-9a-f]{40}', commit):
@@ -97,13 +104,16 @@ def normalize(source, manifest, asset, version):
         raise RuntimeError('upstream_size_invalid')
     if not isinstance(version, str) or not version or len(version) > 100:
         raise RuntimeError('release_version_missing')
-    return {'version': version, 'name': name, 'url': url, 'sha256': digest, 'bytes': size,
-            'provider': provider, 'published_utc': manifest.get('published_utc') or manifest.get('published_at')}
+    result = {'version': version, 'name': name, 'url': url, 'sha256': digest, 'bytes': size,
+              'provider': provider, 'published_utc': manifest.get('published_utc') or manifest.get('published_at')}
+    if provider == 'gitverse' or source.get('manifest'):
+        result.update(artifact_ref=commit, artifact_path=path)
+    return result
 
 
-def discover_component(source, component, fetch):
+def _discover_component(source, component, fetch):
     manifest = get_json(source, fetch)
-    if source.get('provider', 'github') == 'gitverse':
+    if source.get('provider', 'github') == 'gitverse' or source.get('manifest'):
         asset = manifest.get('components', {}).get(component)
         if not isinstance(asset, dict):
             raise RuntimeError('release_asset_missing')
@@ -116,9 +126,9 @@ def discover_component(source, component, fetch):
     return normalize(source, manifest, asset, manifest.get('tag_name'))
 
 
-def discover_apk(source, fetch):
+def _discover_apk(source, fetch):
     manifest = get_json(source, fetch)
-    if source.get('provider', 'github') == 'gitverse':
+    if source.get('provider', 'github') == 'gitverse' or source.get('manifest'):
         asset = manifest.get('apk')
         if not isinstance(asset, dict):
             raise RuntimeError('release_apk_missing')
@@ -135,9 +145,81 @@ def discover_apk(source, fetch):
     result.update(version_code=int(match[2]), version_name=match[1] + '-mc')
     if result['bytes'] > 150_000_000:
         raise RuntimeError('apk_size_invalid')
-    if source.get('provider', 'github') == 'gitverse':
+    if source.get('provider', 'github') == 'gitverse' or source.get('manifest'):
         if type(asset.get('versionCode')) is not int or asset['versionCode'] != result['version_code'] or asset.get('versionName') != result['version_name']:
             raise RuntimeError('apk_version_mismatch')
         if asset.get('package') != 'app.lampac.home.mc':
             raise RuntimeError('apk_package_mismatch')
     return result
+
+
+NETWORK_ERRORS = (urllib.error.URLError, TimeoutError, ConnectionError)
+
+
+def candidates(source):
+    mirrors = source.get('mirrors', [])
+    if not isinstance(mirrors, list) or len(mirrors) > 2 or any(not isinstance(m, dict) or m.get('mirrors') for m in mirrors):
+        raise RuntimeError('invalid_release_mirrors')
+    return [source] + mirrors
+
+
+def discover(source, fetch, probe):
+    choices = candidates(source)
+    for index, candidate in enumerate(choices):
+        try:
+            result = probe(candidate, fetch)
+        except NETWORK_ERRORS:
+            if index + 1 == len(choices):
+                raise
+            continue
+        # Artifact fallback uses the SAME commit, path, size and hash. Never
+        # combine the primary's version with a mirror's changing manifest.
+        result['urls'] = [result['url']]
+        if 'artifact_ref' in result:
+            for mirror in choices:
+                if mirror is candidate:
+                    continue
+                if mirror.get('provider') == 'gitverse' or mirror.get('manifest'):
+                    url = raw_url(mirror, result['artifact_path'], result['artifact_ref'])
+                    if url not in result['urls']:
+                        result['urls'].append(url)
+        return result
+
+
+def discover_component(source, component, fetch):
+    return discover(source, fetch, lambda s, f: _discover_component(s, component, f))
+
+
+def discover_apk(source, fetch):
+    return discover(source, fetch, _discover_apk)
+
+
+def download(release, target, fetch, max_bytes=1024**3):
+    """Retry network failures on trusted mirrors; corrupt content fails closed."""
+    urls = release.get('urls') or [release['url']]
+    deadline = time.monotonic() + 600
+    target = pathlib.Path(target)
+    for index, url in enumerate(urls):
+        try:
+            total = 0
+            digest = hashlib.sha256()
+            request = urllib.request.Request(url, headers={'User-Agent': 'LMPC-Updater'})
+            with fetch(request) as response, target.open('wb') as output:
+                while True:
+                    if time.monotonic() > deadline:
+                        raise RuntimeError('download_deadline_exceeded')
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > release['bytes'] or total > max_bytes:
+                        raise RuntimeError('download_size_mismatch')
+                    digest.update(chunk)
+                    output.write(chunk)
+            if total != release['bytes'] or digest.hexdigest() != release['sha256']:
+                raise RuntimeError('upstream_checksum_mismatch')
+            return url
+        except NETWORK_ERRORS:
+            target.unlink(missing_ok=True)
+            if index + 1 == len(urls) or time.monotonic() > deadline:
+                raise

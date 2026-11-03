@@ -40,18 +40,21 @@ paths=['/opt/lmpc-control/'+n for n in ['release_sources.py','apk_sync.py','sync
 paths+=['/etc/systemd/system/'+n for n in ['lmpc-apk-sync.service','lmpc-apk-sync.timer']]
 paths+=['/opt/lampac/releases/android/latest.json','/opt/lampac/releases/android/previous-latest.json']
 files={p:__import__('base64').b64encode(pathlib.Path(p).read_bytes()).decode() if pathlib.Path(p).exists() else None for p in paths}
-enabled=any(subprocess.run(['systemctl','is-enabled','--quiet',n],capture_output=True).returncode==0 for n in ['lmpc-apk-sync.timer','lmpc-github-apk-sync.timer'])
-print(json.dumps({'files':files,'enabled':enabled}))
+timers=[n for n in ['lmpc-apk-sync.timer','lmpc-github-apk-sync.timer'] if subprocess.run(['systemctl','is-enabled','--quiet',n],capture_output=True).returncode==0]
+print(json.dumps({'files':files,'enabled':bool(timers),'timers':timers}))
 '''))
     (backup / 'container-before.json').write_text(json.dumps(state))
     for c in cfg['components']:
         if c['id'] in ('homemedia', 'channel-manager'):
             repo = 'Lepi4/lampa-home-module' if c['id'] == 'homemedia' else 'Lepi4/lmpc-channel-manager'
             c['source'] = dict(c['source'], provider='gitverse', repo=repo, branch='master' if c['id'] == 'homemedia' else 'main', manifest='module-release.json')
+            c['source'].pop('mirrors', None)
+            c['source']['mirrors'] = [dict(c['source'], provider='github')]
             c['update_note'] = 'Источник: GitVerse · ' + repo + '. Подготовка с SHA-256 и проверкой совместимости; установка вручную, настройки сохраняются.'
     previous_apk = state['files'].get('/opt/lmpc-control/apk-source.json')
     mirror_enabled = json.loads(base64.b64decode(previous_apk)).get('enabled', state['enabled']) if previous_apk else state['enabled']
     apk_config = {'enabled': mirror_enabled, 'source': {'provider': 'gitverse', 'repo': 'Lepi4/lampa-home-module', 'branch': 'master', 'manifest': 'module-release.json'}}
+    apk_config['source']['mirrors'] = [dict(apk_config['source'], provider='github')]
     service = '[Unit]\nDescription=Mirror LMPC APK from configured release source\nAfter=network-online.target lampac.service\nWants=network-online.target\n\n[Service]\nType=oneshot\nUser=root\nExecStart=/usr/bin/python3 /opt/lmpc-control/sync-apk.py\n'
     timer = '[Unit]\nDescription=Periodic LMPC APK mirror\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=30min\nPersistent=true\nUnit=lmpc-apk-sync.service\n\n[Install]\nWantedBy=timers.target\n'
     payload = {'files': {name: (source / name).read_text() for name in FILES}, 'apk_config': apk_config, 'service': service, 'timer': timer, 'stamp': stamp}
@@ -96,7 +99,7 @@ for name,data in v['files'].items():
  if data is None:p.unlink(missing_ok=True)
  else:p.write_bytes(base64.b64decode(data))
 subprocess.run(['systemctl','daemon-reload'],check=True)
-if v['enabled']:subprocess.run(['systemctl','enable','--now','lmpc-github-apk-sync.timer'],check=True)
+for timer in v['timers']:subprocess.run(['systemctl','enable','--now',timer],check=True)
 ''', json.dumps(state))
         for name in FILES + ['config-production.json']:
             if (backup / name).exists():
