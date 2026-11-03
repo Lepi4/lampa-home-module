@@ -386,7 +386,7 @@
           noty('Прозрачность списка: ' + getAlpha() + '% (применится при следующем запуске канала)');
           settings(back);
         } else if (a.act === 'afr') {
-          try { var enabled=!getAfr();localStorage.setItem(AFR_KEY,enabled?'1':'0');if(window.AndroidJS&&AndroidJS.mcSetAfr)AndroidJS.mcSetAfr(enabled); } catch (e) {}
+          try { var enabled=!getAfr();localStorage.setItem(AFR_KEY,enabled?'1':'0');if(window.AndroidJS&&AndroidJS.mcChooseAfr)AndroidJS.mcChooseAfr(enabled);else if(window.AndroidJS&&AndroidJS.mcSetAfr)AndroidJS.mcSetAfr(enabled); } catch (e) {}
           noty('АФР эфира: ' + (getAfr() ? 'включена' : 'выключена') + ' (применится при следующем запуске канала)');
           settings(back);
         } else if (a.act === 'font') {

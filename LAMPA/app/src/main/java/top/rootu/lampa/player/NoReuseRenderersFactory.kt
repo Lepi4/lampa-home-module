@@ -8,6 +8,7 @@ import androidx.media3.exoplayer.audio.AudioOffloadSupport
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
+import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
@@ -26,6 +27,20 @@ import androidx.media3.exoplayer.video.VideoRendererEventListener
  */
 class NoReuseRenderersFactory(context: Context, private val drc: DrcAudioProcessor? = null) : DefaultRenderersFactory(context) {
 
+    @Volatile var allowPassthrough = false
+    @Volatile var lastAudioOutputMime: String? = null
+    private var activeAudioSink: DefaultAudioSink? = null
+
+    // Called through a PlayerMessage on the playback looper. A recoverable
+    // AudioTrack write error resets this sink to PCM-only, even if the separate
+    // capabilities receiver still remembers a valid HDMI route.
+    fun refreshAudioCapabilities(context: Context) {
+        if (!allowPassthrough) return
+        val capabilities = AudioCapabilities.getCapabilities(context)
+        activeAudioSink?.onAudioCapabilitiesChanged(capabilities)
+        android.util.Log.i("HomeAudio", "exo refreshed HDMI capabilities $capabilities")
+    }
+
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink {
         val processor = drc ?: return super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)!!
         val sink = DefaultAudioSink.Builder(context)
@@ -33,17 +48,24 @@ class NoReuseRenderersFactory(context: Context, private val drc: DrcAudioProcess
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(arrayOf(processor))
             .build()
+        activeAudioSink = sink
         return object : ForwardingAudioSink(sink) {
             override fun getFormatSupport(format: Format): Int =
-                if (processor.mode != 0 && format.sampleMimeType != MimeTypes.AUDIO_RAW) AudioSink.SINK_FORMAT_UNSUPPORTED
+                if ((!allowPassthrough || processor.mode != 0) && format.sampleMimeType != MimeTypes.AUDIO_RAW) AudioSink.SINK_FORMAT_UNSUPPORTED
                 else super.getFormatSupport(format)
 
             override fun supportsFormat(format: Format): Boolean = getFormatSupport(format) != AudioSink.SINK_FORMAT_UNSUPPORTED
             override fun getFormatOffloadSupport(format: Format): AudioOffloadSupport =
-                if (processor.mode != 0) AudioOffloadSupport.DEFAULT_UNSUPPORTED else super.getFormatOffloadSupport(format)
+                if (!allowPassthrough || processor.mode != 0) AudioOffloadSupport.DEFAULT_UNSUPPORTED else super.getFormatOffloadSupport(format)
 
             override fun setOffloadMode(offloadMode: Int) =
-                super.setOffloadMode(if (processor.mode != 0) AudioSink.OFFLOAD_MODE_DISABLED else offloadMode)
+                super.setOffloadMode(if (!allowPassthrough || processor.mode != 0) AudioSink.OFFLOAD_MODE_DISABLED else offloadMode)
+
+            override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
+                lastAudioOutputMime = inputFormat.sampleMimeType
+                android.util.Log.i("HomeAudio", "exo_output mime=${inputFormat.sampleMimeType} passthrough=${inputFormat.sampleMimeType != MimeTypes.AUDIO_RAW} drc=${processor.mode} channels=${inputFormat.channelCount}")
+                super.configure(inputFormat, specifiedBufferSize, outputChannels)
+            }
         }
     }
 

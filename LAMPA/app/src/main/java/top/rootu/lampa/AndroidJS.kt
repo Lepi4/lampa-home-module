@@ -270,8 +270,11 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     @JavascriptInterface
     @org.xwalk.core.JavascriptInterface
     fun mcSetAfr(enabled: Boolean) {
-        mainActivity.getSharedPreferences("home_player", android.content.Context.MODE_PRIVATE).edit().putBoolean("afr", enabled).apply()
+        top.rootu.lampa.player.PlayerSettingsStore.acceptAfr(mainActivity, enabled)
     }
+    @JavascriptInterface
+    @org.xwalk.core.JavascriptInterface
+    fun mcChooseAfr(enabled: Boolean) = top.rootu.lampa.player.PlayerSettingsStore.chooseAfr(mainActivity, enabled)
     @JavascriptInterface
     @org.xwalk.core.JavascriptInterface
     fun mcGetAfr(): Boolean = mainActivity.getSharedPreferences("home_player", android.content.Context.MODE_PRIVATE).getBoolean("afr", true)

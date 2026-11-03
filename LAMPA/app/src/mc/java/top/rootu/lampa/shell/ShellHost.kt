@@ -217,8 +217,13 @@ class ShellHost(private val a: MainActivity) : McHostApi {
 
         @JavascriptInterface fun server(): String = a.appUrl
         @JavascriptInterface fun setAfrMode(enabled: Boolean) {
-            a.getSharedPreferences("home_player", Context.MODE_PRIVATE).edit().putBoolean("afr", enabled).apply()
+            top.rootu.lampa.player.PlayerSettingsStore.acceptAfr(a, enabled)
         }
+        @JavascriptInterface fun afrMode(): Boolean = top.rootu.lampa.player.PlayerSettingsStore.afr(a)
+        @JavascriptInterface fun chooseAfrMode(enabled: Boolean) = top.rootu.lampa.player.PlayerSettingsStore.chooseAfr(a, enabled)
+        @JavascriptInterface fun syncAfrPending() = top.rootu.lampa.player.PlayerSettingsStore.syncAfr(a)
+        @JavascriptInterface fun tunneling(): Boolean = a.getSharedPreferences("home_player", Context.MODE_PRIVATE).getBoolean("tunnel", false)
+        @JavascriptInterface fun setTunneling(enabled: Boolean) { a.getSharedPreferences("home_player", Context.MODE_PRIVATE).edit().putBoolean("tunnel", enabled).apply() }
 
         // диагностический журнал оболочки (тот же буфер, что у плеера и страницы Lampa)
         @JavascriptInterface fun dlog(lvl: String, code: String, key: String, x: String) {
@@ -332,6 +337,13 @@ class ShellHost(private val a: MainActivity) : McHostApi {
 
         @JavascriptInterface fun drcMode(): Int =
             a.getSharedPreferences("home_player", Context.MODE_PRIVATE).getInt("drc", 0).coerceIn(0, 2)
+
+        @JavascriptInterface fun audioPassthrough(): Boolean =
+            a.getSharedPreferences("home_player", Context.MODE_PRIVATE).getBoolean("audio_passthrough", false)
+
+        @JavascriptInterface fun setAudioPassthrough(enabled: Boolean) {
+            a.getSharedPreferences("home_player", Context.MODE_PRIVATE).edit().putBoolean("audio_passthrough", enabled).apply()
+        }
 
         @JavascriptInterface fun setDrcMode(mode: Int): Int {
             val value = mode.coerceIn(0, 2)

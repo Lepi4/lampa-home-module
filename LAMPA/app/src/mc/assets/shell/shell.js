@@ -964,7 +964,7 @@
     if (k === 'afr') syncAfr();
     api('/home/dev/set?dev=' + encodeURIComponent(MC.deviceId()) + '&k=' + encodeURIComponent(k) + (v === '' || v == null ? '' : '&v=' + encodeURIComponent(v)), function () { if (cb) cb(); }, function () { toast('Не удалось сохранить на сервере'); });
   }
-  function syncAfr() { try { if (MC.setAfrMode && state.dev && state.dev.afr != null) MC.setAfrMode(String(state.dev.afr) !== '0'); } catch (e) {} }
+  function syncAfr() { try { if(MC.syncAfrPending)MC.syncAfrPending();if (MC.setAfrMode && state.dev && state.dev.afr != null) MC.setAfrMode(String(state.dev.afr) !== '0'); } catch (e) {} }
   var OPT = {
     mc_auto: { t: 'Автозапуск телевидения', d: '0', o: [['0', 'выключен'], ['1', 'включён: сразу включать последний канал']], hint: 'при включении приставки и после долгого сна' },
     engine: { t: 'Движок эфира', d: 'exo', o: [['exo', 'ExoPlayer'], ['mpv', 'mpv · копирование'], ['mpv_embed', 'mpv · прямой вывод'], ['mpv_hw', 'mpv · аппаратный'], ['mpv_sw', 'mpv · программный']] },
@@ -1000,8 +1000,9 @@
     }
     function opt(key, extra) {
       var def = OPT[key], list = def.o;
-      row(def.t, def.hint, function () { return list[optIndex(key, list)][1]; }, function (dir, paint) {
-        var i = (optIndex(key, list) + dir + list.length) % list.length; devSet(key, list[i][0], function () { paint(); if (extra) extra(); });
+      function current() { if(key==='afr'&&MC.afrMode)return MC.afrMode()?0:1;return optIndex(key,list); }
+      row(def.t, def.hint, function () { return list[current()][1]; }, function (dir, paint) {
+        var i = (current() + dir + list.length) % list.length;if(key==='afr'&&MC.chooseAfrMode)MC.chooseAfrMode(list[i][0]!=='0');devSet(key, list[i][0], function () { paint(); if (extra) extra(); });
       });
     }
     function ytLabel() {
@@ -1054,13 +1055,20 @@
     row('Настройки Android', 'сеть, экран, звук, приложения', function () { return '›'; }, null, function () { setupShow(false); MC.settings(); });
     if(userContext&&userContext.profiles_enabled){row('Ленты профиля','Порядок и видимость',function(){return '›';},null,profileRowsSettings);if(!userContext.profile.is_child)row('Автовыбор торрентов','Выключен по умолчанию; удержание открывает ручной выбор',function(){return '›';},null,autoTorrentSettings);}
     group('Звук — все источники');
+    function audioPassthrough() { try { return !!MC.audioPassthrough(); } catch (e) { return false; } }
+    var drcRow;
+    row('Проброс звука', 'Общий для всех профилей приставки · поддерживаемый звук через HDMI/S/PDIF · при включении DRC не применяется · со следующего запуска плеера', function () { return audioPassthrough() ? 'Вкл' : 'Выкл'; }, function (dir, paint) {
+      MC.setAudioPassthrough(!audioPassthrough()); paint();
+      if (drcRow && drcRow._repaint) drcRow._repaint();
+    });
     var drcLabels = ['Выключена', 'Мягкая', 'Ночная'];
     function drcMode() { return Math.max(0, Math.min(2, Number(MC.drcMode()) || 0)); }
-    row('Динамика звука (DRC)', 'ТВ, кино, сериалы, аниме, YouTube и рестлинг · ExoPlayer и mpv · со следующего запуска плеера', function () { return drcLabels[drcMode()]; }, function (dir, paint) {
+    drcRow = row('Динамика звука (DRC)', 'ТВ, кино, сериалы, аниме, YouTube и рестлинг · ExoPlayer и mpv · со следующего запуска плеера', function () { return drcLabels[drcMode()] + (audioPassthrough() ? ' · не применяется' : ''); }, function (dir, paint) {
       MC.setDrcMode((drcMode() + dir + 3) % 3); paint();
     });
     group('Экран — все источники');
     opt('afr');
+    row('Туннелирование A/V (ExoPlayer)', 'Аппаратная синхронизация видео и звука · отдельная настройка от проброса · не применяется при действующей DRC · со следующего запуска плеера', function () { try{return MC.tunneling()?'Вкл':'Выкл';}catch(e){return 'Выкл';} }, function (dir, paint) { MC.setTunneling(!MC.tunneling());paint(); });
     group('Телевидение');
     opt('mc_auto'); opt('engine'); opt('buf'); opt('font'); opt('alpha');
     group('Кино и сериалы');
@@ -1309,6 +1317,7 @@
     profileRefreshed:function(next,generation){if(generation===userGeneration)applyUserPolicy(next);},
     home: function () { if (state.setupOpen) return; state.nav.forEach(function (n) { if (n.strip) n.strip.scrollLeft = 0; }); setFocus(state.nav.length > 1 ? 1 : 0, 0); $('scroll').scrollTop = 0; },
     resume: function (away) {
+      syncAfr();
       state.waiting=false;hideWait();
       if(refreshUserPolicy())return;
       if(!state.setupOpen&&state.server)refreshMyChannels();
