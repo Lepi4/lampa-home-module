@@ -160,8 +160,9 @@
   var GENRES = { 28: 'Боевик', 12: 'Приключения', 16: 'Мультфильм', 35: 'Комедия', 80: 'Криминал', 99: 'Документальный', 18: 'Драма', 10751: 'Семейный', 14: 'Фэнтези', 36: 'История', 27: 'Ужасы', 10402: 'Музыка', 9648: 'Детектив', 10749: 'Мелодрама', 878: 'Фантастика', 10770: 'ТВ-фильм', 53: 'Триллер', 10752: 'Военный', 37: 'Вестерн', 10759: 'Боевик и приключения', 10762: 'Детский', 10763: 'Новости', 10764: 'Реалити-шоу', 10765: 'НФ и фэнтези', 10766: 'Мыльная опера', 10767: 'Ток-шоу', 10768: 'Война и политика' };
   var COUNTRY = { US: 'США', RU: 'Россия', GB: 'Великобритания', JP: 'Япония', KR: 'Южная Корея', FR: 'Франция', DE: 'Германия', IN: 'Индия', CN: 'Китай', TR: 'Турция', IT: 'Италия', ES: 'Испания', CA: 'Канада', UA: 'Украина', BR: 'Бразилия', SE: 'Швеция', AU: 'Австралия', DK: 'Дания', NO: 'Норвегия', PL: 'Польша', MX: 'Мексика', HK: 'Гонконг', TW: 'Тайвань', TH: 'Таиланд', SU: 'СССР' };
   function infoOn() { return String((state.dev || {}).mc_info != null ? state.dev.mc_info : '1') !== '0'; }
-  var infoT = null;
+  var infoT = null, infoItem = null;
   function showInfo(item) {
+    infoItem = item;
     var box = $('info');
     clearTimeout(infoT);
     document.body.classList.toggle('info-on', !!(item && infoOn()));
@@ -184,7 +185,7 @@
         if (item.origin_country && item.origin_country.length) meta.push(item.origin_country.map(function (c) { return COUNTRY[c] || c; }).join(', '));
         else if (item.countries_ru && item.countries_ru.length) meta.push(item.countries_ru.slice(0, 2).join(', '));
         if (item.vote_average > 0) meta.push('★ ' + item.vote_average.toFixed(1));
-        var q = item.release_quality || item.cp_quality; if (q) meta.push(q);
+        var q = item.release_quality || item.cp_quality || qcache(item); if (q) meta.push(esc(q));
         if (item.kp_new > 0) meta.push('новых серий: ' + item.kp_new);
       }
       if (meta.length) h += '<div class="im">' + meta.join(' · ') + '</div>';
@@ -645,7 +646,9 @@
   function ctxOf() { return { server: state.server, profile: state.profile, generation:userGeneration }; }
   function sameCtx(c) { return c.server === state.server && c.profile === state.profile && c.generation === userGeneration; }
   function scopedFor(base, c) { var n = String(c.server || '') + '|' + String(c.profile || ''), h = 0; for (var i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) | 0; return base + '_' + (h >>> 0).toString(36); }
-  function qcache(item) { var m = load(scopedKey('mc_q_v2'), {}); var k = (item.media_type === 'tv' || item.name ? 't' : 'm') + item.id; return cget(m, k) || ''; }
+  function qualityKey(item) { return (item.media_type === 'tv' || item.name || item.first_air_date ? 't' : 'm') + item.id; }
+  function qcache(item) { var m = load(scopedKey('mc_q_v2'), {}); return cget(m, qualityKey(item)) || ''; }
+  function refreshInfoQuality(keys) { if (infoItem && keys.indexOf(qualityKey(infoItem)) >= 0) showInfo(infoItem); }
   function needKp(item, card) {
     var tv = item.media_type === 'tv' || !!item.name, k = keyOf(item, tv);
     var m = load(scopedKey('mc_kp'), {}), v = cget(m, k); if (v !== undefined) { if (v) picOf(card).appendChild(el('div', 'kpb', 'KP')); return; }
@@ -683,6 +686,7 @@
         var d = JSON.parse(x.responseText), m = load(ck, {}), here = sameCtx(cx);if(!d||d.error){retryBatch();return;}
         keys.forEach(function (k) { cput(m, k, d[k] || ''); if (here && d[k]) batch[k].cards.forEach(function (c) { if (!c.querySelector('.bdg')) picOf(c).appendChild(el('div', 'bdg', d[k])); }); });
         save(ck, ctrim(m));
+        refreshInfoQuality(keys);
       } catch (e) {retryBatch();return;}
       again(1500);
     };
@@ -1123,6 +1127,17 @@
   var RATINGS = [[0, 'любой'], [5, 'от 5'], [6, 'от 6'], [7, 'от 7'], [8, 'от 8']];
   function sfGet() { return load('mc_sf', { p: '', c: 'all', r: 0 }); }
   function periodParams(p) { var y = new Date().getFullYear(); return { y1: [y, y], y3: [y - 2, y], y10: [y - 9, y], d2020: [2020, 2029], d2010: [2010, 2019], d2000: [2000, 2009], old: [1800, 1999] }[p] || [0, 0]; }
+  function searchAlternative(q) { return q.replace(/[эЭёЁ]/g, function (c) { return { 'э': 'е', 'Э': 'Е', 'ё': 'е', 'Ё': 'Е' }[c]; }).replace(/([А-Яа-я])[-‐‑–—](?=[А-Яа-я])/g, '$1'); }
+  function searchWithAlternative(path, q, category, request, ok, fail) {
+    request(path, function (d) {
+      var alternate = searchAlternative(q);
+      if (category !== 'yc' && category !== 'yv' && alternate !== q && d && Array.isArray(d.results) && !d.results.length && !d.next_page && !d.error) {
+        var next = path.replace(/([?&])q=[^&]*/, function (_, sep) { return sep + 'q=' + encodeURIComponent(alternate); });
+        return request(next, function (result) { ok(result, next); }, fail);
+      }
+      ok(d, path);
+    }, fail);
+  }
   function searchCategories() { var cfg=userContext&&userContext.profile.settings||{};var on=cfg.youtube_mode!=='off'&&(!cfg.sources||cfg.sources.youtube!==false)&&(!state.sources||state.sources.youtube!==false);return SEARCH_CATEGORIES.filter(function(c){return on||c[0]!=='yc'&&c[0]!=='yv';}); }
   function searchMode() {
     var v = load('mc_smode', 'movie'), legacy = { everything: 'movie', all: 'movie', anime: 'anime_tv' };
@@ -1244,12 +1259,12 @@
         var f = sfGet(), pr = periodParams(f.p);
         path = '/home/search/v2?category=' + cat + '&q=' + encodeURIComponent(q) + '&country=' + f.c + (pr[0] ? '&from=' + pr[0] + '&to=' + pr[1] : '') + (f.r ? '&minr=' + f.r : '');
       }
-      request(path, function (d) {
+      searchWithAlternative(path, q, cat, request, function (d, resolvedPath) {
         var list = d.results || [];
         render(cat, list, false);
         nextPage = d.next_page || 0;
         // продолжение определяет next_page, а не непустота порции: сервер мог просмотреть страницы и не найти подходящих
-        if (nextPage) { var m = tile('Показать ещё', null, function () { loadMore(cat, path); }); m.classList.add('gc', 'more'); section.appendChild(m); }
+        if (nextPage) { var m = tile('Показать ещё', null, function () { loadMore(cat, resolvedPath); }); m.classList.add('gc', 'more'); section.appendChild(m); }
         info.textContent = name + ': ' + (list.length ? 'найдено ' + list.length + (nextPage ? ' (есть ещё)' : '') : (nextPage ? 'в этой порции ничего нет — нажмите «Показать ещё»' : 'ничего не найдено'));
         syncItems();
       }, function () { last = ''; info.textContent = name + ': источник недоступен, повторите поиск'; });
