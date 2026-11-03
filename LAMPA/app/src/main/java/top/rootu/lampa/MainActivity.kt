@@ -447,13 +447,13 @@ class MainActivity : BaseActivity(),
         val own=mcNavigationGeneration
         browser?.evaluateJavascript("window.__mc_shell_origin=window.Lampa&&Lampa.Activity.active();window.__mc_ret=1"){ }
         val hold=i.getBooleanExtra("mc_hold_shell",false)
-        if(hold) browser?.evaluateJavascript("window.__mc_nav_origin=window.Lampa&&Lampa.Activity.active();window.__mc_nav_select=document.querySelector('.selectbox')?.textContent||''"){}
+        if(hold) browser?.evaluateJavascript("window.__mc_nav_origin=window.Lampa&&Lampa.Activity.active();window.__mc_nav_select=(document.querySelector('.selectbox')||{}).textContent||''"){}
         trustedHomeNavigation=true;try{onNewIntent(i)}finally{trustedHomeNavigation=false}
         if(hold) lifecycleScope.launch {
             repeat(600){
                 delay(100)
                 if(own!=mcNavigationGeneration)return@launch
-                val check="(function(){if(!window.Lampa)return false;var a=Lampa.Activity.active();return !!((a&&a!==window.__mc_nav_origin&&a.component!=='main'&&a.activity&&a.activity.is_started)||document.body.classList.contains('search--open')||(Lampa.Select.opened()&&(document.querySelector('.selectbox')?.textContent||'')!==window.__mc_nav_select))})()"
+                val check="(function(){if(!window.Lampa)return false;var a=Lampa.Activity.active();return !!((a&&a!==window.__mc_nav_origin&&a.component!=='main'&&a.activity&&a.activity.is_started)||document.body.classList.contains('search--open')||(Lampa.Select.opened()&&((document.querySelector('.selectbox')||{}).textContent||'')!==window.__mc_nav_select))})()"
                 browser?.evaluateJavascript(check){r->if(r=="true"&&own==mcNavigationGeneration){mcNavigationGeneration++;mcHost?.hide()}}
             }
             if(own==mcNavigationGeneration){mcCancelNavigation();mcHost?.back();android.widget.Toast.makeText(this@MainActivity,"Не удалось открыть раздел. Попробуйте ещё раз",android.widget.Toast.LENGTH_LONG).show()}
