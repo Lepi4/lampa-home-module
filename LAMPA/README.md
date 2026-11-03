@@ -1,3 +1,13 @@
+# Исходники APK LMPC Media Center
+
+Этот Android-клиент — форк [lampa-app/LAMPA](https://github.com/lampa-app/LAMPA), адаптированный для медиaцентра на базе [Lampac NextGen](https://github.com/lampac-nextgen/lampac).
+
+Код приложения находится в [app/src/](app/src/), код оболочки Media Center — в [app/src/mc/](app/src/mc/). Файлы сборки: [app/build.gradle](app/build.gradle), [settings.gradle](settings.gradle), [Gradle Wrapper](gradle/wrapper/). [Инструкция по сборке APK](../ANDROID-SOURCE.md).
+
+Для опубликованного варианта mc требуется JDK 17 и Android SDK 34. На Windows: `gradlew.bat assembleMcRelease -PappVersionCode=1132 -PappVersionName=1.16.14`. Ключ подписи издателя в исходники не включён. Условия лицензирования описаны в [LICENSE-SCOPE.md](../LICENSE-SCOPE.md).
+
+Ниже сохранено описание исходного проекта LAMPA.
+
 <p align="center" style="text-align: center">
   <img src="https://github.com/yumata/lampa/blob/main/img/logo-icon.svg" width="25%"><br/>
 </p>

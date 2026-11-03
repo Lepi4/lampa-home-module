@@ -1,5 +1,11 @@
 # LMPC HomeMedia и Android TV
 
+Медиацентр LMPC — производный проект на базе [Lampac NextGen (GitHub)](https://github.com/lampac-nextgen/lampac). Здесь опубликованы модуль HomeMedia и Android-клиент; серверное ядро Lampac является отдельным исходным проектом.
+
+Android-приложение LMPC Media Center — форк [lampa-app/LAMPA (GitHub)](https://github.com/lampa-app/LAMPA).
+
+**[Открыть исходники APK — папка LAMPA/ в ветке master](https://gitverse.ru/Lepi4/lampa-home-module/content/master/LAMPA)** · [код приложения](https://gitverse.ru/Lepi4/lampa-home-module/content/master/LAMPA/app/src) · [инструкция по сборке](ANDROID-SOURCE.md).
+
 Лицензирование: [PolyForm Noncommercial 1.0.0](LICENSE.md) для самостоятельных материалов Lepi4. Разрешены некоммерческое использование, копирование, изменение и распространение. [Область действия и лицензии стороннего кода](LICENSE-SCOPE.md).
 
 Публичный пакет LMPC содержит мод HomeMedia для Lampac, исходники Android-клиента и проверенную APK-сборку.

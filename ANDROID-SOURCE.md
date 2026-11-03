@@ -4,6 +4,8 @@
 
 ## Происхождение
 
+Медиацентр использует [Lampac NextGen](https://github.com/lampac-nextgen/lampac) как серверную основу. Серверное ядро Lampac и исходный Android-клиент LAMPA — разные проекты.
+
 Android-клиент основан на [lampa-app/LAMPA](https://github.com/lampa-app/LAMPA). В этой копии находятся изменения LMPC: нативная оболочка Media Center, проигрыватели, профили и взаимодействие с домашним сервером. Условия стороннего кода и границы применения лицензии Lepi4 описаны в [LICENSE-SCOPE.md](LICENSE-SCOPE.md).
 
 ## Где находится код
