@@ -71,10 +71,10 @@ python3 deploy/deploy-module.py \
 
 ## Android
 
-Готовая сборка: `release/apk-1137/LMPC-1.16.19-1137.apk`.
+Готовая сборка: `release/apk-1138/LMPC-1.16.20-1138.apk`.
 
 ```bash
-adb install -r release/apk-1137/LMPC-1.16.19-1137.apk
+adb install -r release/apk-1138/LMPC-1.16.20-1138.apk
 ```
 
 **[Исходный код APK находится в LAMPA/](LAMPA/)**: код приложения, ресурсы и файлы Gradle опубликованы вместе с медиасерверным модулем. [Происхождение кода, состав исходников и сборка](ANDROID-SOURCE.md).
@@ -95,7 +95,7 @@ cd LAMPA
 ## Релиз
 
 - HomeMedia: `2026.11.03.1`
-- APK: `1.16.19-mc`, versionCode `1134`
+- APK: `1.16.20-mc`, versionCode `1134`
 - SHA-256 APK: `f1d0ea88fb9ecfbeedf2a3d14336a3c862525a5c735fc8d88b555bc672d3f80e`
 
 Пакет последнего релиза: `release/2026.11.03.1/homemedia.tar.gz`.

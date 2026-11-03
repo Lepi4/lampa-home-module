@@ -1178,7 +1178,7 @@
     box.className = 'searchbox hidden';
     box.appendChild(el('h1', null, 'Поиск'));
     var line = el('div', 'sline'); box.appendChild(line);
-    var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = 'Что искать?'; inp.value = q0 || lastQuery || '';
+    var inp = document.createElement('input'); inp.type = 'search'; inp.setAttribute('enterkeyhint', 'search'); inp.placeholder = 'Что искать?'; inp.value = q0 || lastQuery || '';
     var mic = tile('🎤 Голос', null, function () { try { MC.voice(); } catch (e) {} });
     var back = tile('Закрыть', null, closeSearch);
     line.appendChild(inp); line.appendChild(mic); line.appendChild(back);
@@ -1285,7 +1285,9 @@
       });
     }
     inp.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { run(inp.value); }, 700); });
-    inp._act = function () { clearTimeout(timer); run(inp.value); try { inp.blur(); } catch (e) {} syncItems(); var first = state.setupItems.filter(function (n) { return n.classList && n.classList.contains('gc'); })[0]; if (first) { state.setupIdx = state.setupItems.indexOf(first); setupFocus(); } };
+    // OK in the text field belongs to WebView: it opens the Android keyboard.
+    // The keyboard's Search action submits via the standard search event.
+    inp.addEventListener('search', function () { clearTimeout(timer); run(inp.value); try { inp.blur(); } catch (e) {} syncItems(); var first = state.setupItems.filter(function (n) { return n.classList && n.classList.contains('gc'); })[0]; if (first) { state.setupIdx = state.setupItems.indexOf(first); setupFocus(); } });
     window.__mc.onVoice = function (t) { if (t) { inp.value = t; run(t); } };
     state._searchClose = function () { clearTimeout(timer); if (xhr) { try { xhr.abort(); } catch (e) {} } gen++; window.__mc.onVoice = function () {}; };
     state.searchOpen = true;
