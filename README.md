@@ -27,7 +27,9 @@ python3 deploy/deploy-module.py \
 adb install -r release/LMPC-1.16.14-1132.apk
 ```
 
-Исходники находятся в `LAMPA/`. Для сборки flavor `mc` требуется JDK 17:
+**[Исходный код APK находится в LAMPA/](LAMPA/)**: код приложения, ресурсы и файлы Gradle опубликованы вместе с медиасерверным модулем. [Происхождение кода, состав исходников и сборка](ANDROID-SOURCE.md).
+
+Для сборки flavor `mc` требуется JDK 17:
 
 ```bash
 cd LAMPA
