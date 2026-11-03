@@ -94,6 +94,22 @@ class HomePlayerActivity : Activity() {
     private lateinit var frameRate: PlaybackFrameRateController
     private val ptsRate = PtsFrameRateEstimator()
     private val drc = DrcAudioProcessor()
+    private lateinit var audioRenderers: NoReuseRenderersFactory
+    private val refreshPassthroughAfterDisplayChange = Runnable {
+        if (!finished && ::player.isInitialized && ::audioRenderers.isInitialized &&
+            audioRenderers.allowPassthrough && audioRenderers.lastAudioOutputMime == androidx.media3.common.MimeTypes.AUDIO_RAW &&
+            !intent.getBooleanExtra("noaudio", false)) {
+            val format = player.audioFormat
+            val supported = format != null && try {
+                androidx.media3.exoplayer.audio.AudioCapabilities.getCapabilities(this)
+                    .isPassthroughPlaybackSupported(format, player.audioAttributes)
+            } catch (_: Exception) { false }
+            if (supported) {
+                val renderers = audioRenderers
+                player.createMessage { _, _ -> renderers.refreshAudioCapabilities(this) }.send()
+            }
+        }
+    }
     private var firstFrameSeen = false
     private var bufferStartedAt = 0L
     private var spinnerWasShown = false
@@ -420,6 +436,10 @@ class HomePlayerActivity : Activity() {
         }
         buildUi()
         frameRate = PlaybackFrameRateController(this)
+        frameRate.onOutputChanged = {
+            ui.removeCallbacks(refreshPassthroughAfterDisplayChange)
+            ui.postDelayed(refreshPassthroughAfterDisplayChange, 2500)
+        }
         setupPlayer(data)
         ui.post(ticker)
         setOverlay(true)
@@ -743,6 +763,7 @@ class HomePlayerActivity : Activity() {
         srcBtn.visibility = View.GONE
         extBtn = ctl("↗", 20f) { openExternal() }.apply { contentDescription = "Внешний плеер" }
         rightG.addView(srcBtn); rightG.addView(qualityBtn); rightG.addView(audioBtn); rightG.addView(subsBtn); rightG.addView(extBtn)
+        rightG.addView(ctl("⚙", 20f) { showPlaybackSettings() }.apply { contentDescription = "Настройки плеера" })
 
         transportRow.addView(midG, LinearLayout.LayoutParams(-2, -2))
         val settingsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -925,7 +946,9 @@ class HomePlayerActivity : Activity() {
         val afr = playerPrefs.getBoolean("afr", intent.getIntExtra("tv_afr", 1) != 0)
         frameRate.configure(afr, live)
         android.util.Log.i("HomeAFR", "afr_config enabled=$afr live=$live")
-        drc.mode = playerPrefs.getInt("drc", 0).coerceIn(0, 2)
+        val audioOutput = AudioOutputSettings.read(this)
+        drc.mode = audioOutput.effectiveDrc
+        android.util.Log.i("HomeAudio", "exo_config passthrough=${audioOutput.passthrough} drc_saved=${audioOutput.savedDrc} drc_effective=${drc.mode} live=$live")
         tvNowUrl = intent.getStringExtra("tv_now_url")
         tvDev = intent.getStringExtra("tv_dev") ?: ""
         if (live) {
@@ -975,6 +998,7 @@ class HomePlayerActivity : Activity() {
                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, noAudio)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .setTunnelingEnabled(tunnel && drc.mode == 0)
+                .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(audioOutput.passthrough)
                 .setPreferredAudioLanguages("rus", "ru")
                 .setAllowVideoMixedMimeTypeAdaptiveness(true)
                 .apply {
@@ -991,10 +1015,11 @@ class HomePlayerActivity : Activity() {
                 }
                 .build()
         }
+        audioRenderers = NoReuseRenderersFactory(this, drc).apply { allowPassthrough = audioOutput.passthrough }
         player = ExoPlayer.Builder(
             this,
             // декодер при смене канала создаётся заново (иначе Amlogic «сыплет» картинку после переключения)
-            NoReuseRenderersFactory(this, drc)
+            audioRenderers
                 .setEnableDecoderFallback(true)
                 // программные декодеры FFmpeg подключаются, когда аппаратного нет (MP2 и др.)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
@@ -1166,6 +1191,22 @@ class HomePlayerActivity : Activity() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // Misreported HDMI support must not leave either live or VOD in
+                // a retry loop. Retry this session with decoded PCM, preserving
+                // the selected item/position and the device's saved preference.
+                if (audioRenderers.allowPassthrough && error.errorCode in setOf(
+                        PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+                        PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED)) {
+                    audioRenderers.allowPassthrough = false
+                    val index = player.currentMediaItemIndex
+                    val position = player.currentPosition
+                    DLog.log("w", "audio_pcm_fallback", error.errorCodeName, "live=$live")
+                    android.util.Log.w("HomeAudio", "exo passthrough failed; retry PCM ${error.errorCodeName}")
+                    Toast.makeText(this@HomePlayerActivity, "Проброс недоступен: звук через PCM", Toast.LENGTH_LONG).show()
+                    player.seekTo(index, position)
+                    player.prepare()
+                    return
+                }
                 if (live && liveRetries < 30) {
                     DLog.log("w", "live_retry", error.errorCodeName, "attempt=${liveRetries + 1} buffer=${player.totalBufferedDuration}")
                     reconnect(); return
@@ -1933,6 +1974,11 @@ class HomePlayerActivity : Activity() {
             }
         }
         return out
+    }
+
+    private fun showPlaybackSettings() {
+        ui.removeCallbacks(hideOverlay)
+        PlayerSettingsDialog.show(this) { if (!finished) setOverlay(true, true) }
     }
 
     private fun show(title: String, labels: List<String>, checked: Int, onPick: (Int) -> Unit) {

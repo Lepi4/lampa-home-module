@@ -13,8 +13,7 @@ class MpvSessionDrc private constructor(val sessionId: Int, private val effect: 
     fun release() { try { effect.release() } catch (_: Exception) {} }
 
     companion object {
-        fun create(context: Context): MpvSessionDrc? {
-            val mode = context.getSharedPreferences("home_player", Context.MODE_PRIVATE).getInt("drc", 0).coerceIn(0, 2)
+        fun create(context: Context, mode: Int = AudioOutputSettings.read(context).effectiveDrc): MpvSessionDrc? {
             if (mode == 0) { Log.i("HomeAudio", "mpv DRC off"); return null }
             var effect: DynamicsProcessing? = null
             try {

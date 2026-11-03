@@ -128,6 +128,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
     private var bufferWait = 3
     private var afrDone = 0f
     private var afrOn = true
+    private var spdifActive = false
     private var shotDone = false
 
     // Автоматическая частота кадров (тот же подбор, что у штатного плеера): режим экрана, кратный частоте кадров видео;
@@ -424,11 +425,15 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         }
         o("hwdec", hwdec)
         o("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
-        // PCM вывод; DRC привязан только к выделенному сеансу этого mpv, без глобальных эффектов.
-        sessionDrc = MpvSessionDrc.create(this)
+        val audioOutput = AudioOutputSettings.read(this)
+        val spdif = AudioOutputSettings.mpvCodecs(this, audioOutput)
+        spdifActive = spdif.isNotBlank()
+        // DRC is bypassed while passthrough is enabled; its saved mode is kept.
+        sessionDrc = MpvSessionDrc.create(this, audioOutput.effectiveDrc)
         o("ao", if (sessionDrc != null) "audiotrack" else "audiotrack,opensles")
         sessionDrc?.let { o("audiotrack-session-id", it.sessionId.toString()) }
-        o("audio-spdif", "")
+        o("audio-spdif", spdif)
+        android.util.Log.i("HomeAudio", "mpv_config passthrough=${audioOutput.passthrough} codecs=$spdif drc_saved=${audioOutput.savedDrc} drc_effective=${audioOutput.effectiveDrc}")
         afrOn = getSharedPreferences("home_player", MODE_PRIVATE).getBoolean("afr", intent.getIntExtra("tv_afr", 1) != 0)
         android.util.Log.i("HomeAFR", "afr_config enabled=$afrOn live=true engine=mpv")
         o("alang", "rus,ru")
@@ -692,6 +697,16 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         if (!surfaceReady || !started) return
         val now = System.currentTimeMillis()
         val pos = try { MPVLib.getPropertyDouble("time-pos") } catch (_: Exception) { null }
+        // Some Android outputs advertise AC3/DTS but cannot open mpv's IEC61937
+        // AudioTrack. Do not let the live reconnect watchdog repeat that failure.
+        if (spdifActive && now - loadedAt > 2500 && prop("audio-codec-name") != "—" && prop("current-ao") == "—") {
+            spdifActive = false
+            MPVLib.setPropertyString("audio-spdif", "")
+            android.util.Log.w("HomeAudio", "mpv passthrough output unavailable; retry PCM")
+            Toast.makeText(this, "Проброс недоступен в mpv: звук через PCM", Toast.LENGTH_LONG).show()
+            loadChannel(cur)
+            return
+        }
         if (pos != null && pos != lastPos) {
             if (lastPos < 0) android.util.Log.i("MpvTv", "ПУСК: ход времени через ${now - loadedAt} мс после loadfile, канал=${cur + 1}")
             lastPos = pos
@@ -768,6 +783,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
             MPVLib.MPV_EVENT_PLAYBACK_RESTART, MPVLib.MPV_EVENT_FILE_LOADED -> ui.post {
                 if (statusView.text == "Загрузка…") statusView.text = ""
                 sessionDrc?.let { android.util.Log.i("HomeAudio", "mpv DRC session=${it.sessionId} enabled=${it.enabled} ao=${prop("current-ao")}") }
+                android.util.Log.i("HomeAudio", "mpv_output ao=${prop("current-ao")} format=${prop("audio-out-params/format")} rate=${prop("audio-out-params/samplerate")} channels=${prop("audio-out-params/channels")}")
             }
         }
     }
@@ -1117,7 +1133,8 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
             KeyEvent.KEYCODE_MEDIA_STOP -> { finishPlayer(); return true }
             KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { stepChannel(1); return true }
             KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_MEDIA_REWIND -> { stepChannel(-1); return true }
-            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> { statsOn = !statsOn; return true }
+            KeyEvent.KEYCODE_MENU -> { PlayerSettingsDialog.show(this); return true }
+            KeyEvent.KEYCODE_INFO -> { statsOn = !statsOn; return true }
         }
         if (panelOpen) {
             if (progOpen) {

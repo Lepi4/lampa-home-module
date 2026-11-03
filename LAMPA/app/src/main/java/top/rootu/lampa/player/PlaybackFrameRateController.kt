@@ -10,6 +10,7 @@ import kotlin.math.abs
 
 /** The sole owner of refresh-rate requests for this playback window. Media3's surface voting is off. */
 class PlaybackFrameRateController(private val activity: Activity) : DisplayManager.DisplayListener {
+    var onOutputChanged: (() -> Unit)? = null
     private val handler = Handler(Looper.getMainLooper())
     private val displays = activity.getSystemService(Activity.DISPLAY_SERVICE) as DisplayManager
     private val originalMode = if (Build.VERSION.SDK_INT >= 23) activity.window.attributes.preferredDisplayModeId else 0
@@ -113,6 +114,7 @@ class PlaybackFrameRateController(private val activity: Activity) : DisplayManag
         if (d.displayId != displayId || d.mode.modeId == actualId) return
         actualId = d.mode.modeId
         trace("afr_actual", actualId.toString(), "hz=${d.mode.refreshRate} selected=${selected?.id}")
+        onOutputChanged?.invoke()
         // Observe actual hardware changes; do not turn them into another refresh-rate request.
     }
     override fun onDisplayAdded(displayId: Int) = Unit

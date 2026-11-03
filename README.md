@@ -71,10 +71,10 @@ python3 deploy/deploy-module.py \
 
 ## Android
 
-Готовая сборка: `release/LMPC-1.16.14-1132.apk`.
+Готовая сборка: `release/LMPC-1.16.16-1134.apk`.
 
 ```bash
-adb install -r release/LMPC-1.16.14-1132.apk
+adb install -r release/LMPC-1.16.16-1134.apk
 ```
 
 **[Исходный код APK находится в LAMPA/](LAMPA/)**: код приложения, ресурсы и файлы Gradle опубликованы вместе с медиасерверным модулем. [Происхождение кода, состав исходников и сборка](ANDROID-SOURCE.md).
@@ -83,7 +83,7 @@ adb install -r release/LMPC-1.16.14-1132.apk
 
 ```bash
 cd LAMPA
-./gradlew assembleMcRelease -PappVersionCode=1132 -PappVersionName=1.16.14
+./gradlew assembleMcRelease -PappVersionCode=1134 -PappVersionName=1.16.16
 ```
 
 Подпись и keystore намеренно не входят в публичный пакет. Не публикуйте `.env`, токены, cookies, базы данных или резервные копии.
@@ -94,11 +94,13 @@ cd LAMPA
 
 ## Релиз
 
-- HomeMedia: `2026.11.02.5`
-- APK: `1.16.14-mc`, versionCode `1132`
-- SHA-256 APK: `68dc95d9adcd1ae244698f1ae00e75a2ecea922c42a0b5ada7a12a1501255a61`
+- HomeMedia: `2026.11.03.1`
+- APK: `1.16.16-mc`, versionCode `1134`
+- SHA-256 APK: `f1d0ea88fb9ecfbeedf2a3d14336a3c862525a5c735fc8d88b555bc672d3f80e`
 
 Пакет последнего релиза: `release/homemedia.tar.gz`.
 
 Прокси редактируются прямо в разделах YouTube, Кинопаба и состояния сервера в `/home`: поле адреса, «Без прокси», «Проверить», «Сохранить». [Инструкция](docs/PROXY.md).
 Ссылки Channel Manager, TorrServer и Tvheadend открываются относительно панели через контейнер.
+
+????? ????????? ???, ???????? ?????, DRC ? ?????????????? ???????? ????? ? ???? ??????????? ??????. [????](docs/AUDIO.md), [???????? APK 1134 ? ??????????? HDMI](docs/AUDIO-PLAYER-1134-20261103.md).
