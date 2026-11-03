@@ -98,6 +98,17 @@ public static class TvStore
     }
 
     public static string BaseUrl => ((string)Config()["url"] ?? "").TrimEnd('/');
+    // Channel Manager builds playlist URLs from the server-side Host header.
+    // Its loopback address is valid for warming, but refers to the TV itself
+    // when handed to a remote player. Keep the cached internal playlist intact.
+    public static string ClientStreamUrl(string value, string clientHost)
+    {
+        Uri uri;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out uri) ||
+            (uri.Scheme != "http" && uri.Scheme != "https") || !uri.IsLoopback ||
+            string.IsNullOrWhiteSpace(clientHost)) return value;
+        return new UriBuilder(uri) { Host = clientHost.Trim('[', ']') }.Uri.AbsoluteUri;
+    }
     public static bool Enabled => (bool?)Config()["enable"] ?? true;
 
     static readonly Regex attr = new("([\\w-]+)=\"([^\"]*)\"", RegexOptions.Compiled);
@@ -612,7 +623,7 @@ public class TvGuideController : BaseController
             var list = ch.Select(c =>
             {
                 var (n, x) = TvStore.NowNext(c.Epg);
-                return new { id = c.Id, num = c.Num, name = c.Name, logo = c.Logo, epg = c.Epg, url = c.Url, src = TvStore.SrcType(c.Id), n = Pr(n), x = Pr(x) };
+                return new { id = c.Id, num = c.Num, name = c.Name, logo = c.Logo, epg = c.Epg, url = TvStore.ClientStreamUrl(c.Url, Request.Host.Host), src = TvStore.SrcType(c.Id), n = Pr(n), x = Pr(x) };
             }).ToList();
             TvStore.FillSrcTypesPublic(ch);
             return Json(new { channels = list, epg_loading = TvStore.EpgBusy });
