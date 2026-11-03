@@ -1,11 +1,24 @@
 {
-  "homemedia": "2026.11.02.5",
+  "homemedia": "2026.11.03.1",
   "apk": {
-    "versionName": "1.16.14-mc",
-    "versionCode": 1132,
-    "file": "release/LMPC-1.16.14-1132.apk",
-    "sha256": "68dc95d9adcd1ae244698f1ae00e75a2ecea922c42a0b5ada7a12a1501255a61"
+    "file": "release/2026.11.03.1/LMPC-1.16.16-1134.apk",
+    "sha256": "f1d0ea88fb9ecfbeedf2a3d14336a3c862525a5c735fc8d88b555bc672d3f80e",
+    "bytes": 35204988,
+    "versionCode": 1134,
+    "versionName": "1.16.16-mc",
+    "package": "app.lampac.home.mc"
   },
   "install": "deploy/deploy-module.py",
-  "package": "release/homemedia.tar.gz"
+  "package": "release/2026.11.03.1/homemedia.tar.gz",
+  "schema": 1,
+  "artifact_ref": "e4eb0ba38ba73dc60ed63ce4472781112479c782",
+  "published_utc": "2026-11-03T18:44:34.438860+00:00",
+  "components": {
+    "homemedia": {
+      "file": "release/2026.11.03.1/homemedia.tar.gz",
+      "sha256": "a240e91010f5ff958292d968b1cbef956544f1e9bb8ed4e89eae4c41b99d35a6",
+      "bytes": 388631,
+      "version": "2026.11.03.1"
+    }
+  }
 }
