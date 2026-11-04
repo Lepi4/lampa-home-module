@@ -74,7 +74,7 @@
 <body>
 <header>
   <div style="flex:1;min-width:0"><h1>Lampa Home · сервер</h1><div class="sub" id="clock"></div></div>
-  <a href="/profiles" style="margin:8px">Профили и вход</a>
+  <a href="/profiles?next=/home" style="margin:8px">Профили и вход</a>
   <button id="refresh">Обновить</button>
 </header>
 <main id="main"></main>
@@ -85,7 +85,6 @@
   'use strict';
   var BASE = '{localhost}'.replace(/\/$/, '');
   if (BASE.indexOf('{') === 0) BASE = location.origin;
-  var adminToken = '';
 
   function el(tag, attrs) {
     var e = document.createElement(tag);
@@ -106,7 +105,6 @@
     opts = opts || {};
     var headers = {};
     Object.keys(opts.headers || {}).forEach(function (k) { headers[k] = opts.headers[k]; });
-    if (adminToken) headers['X-Home-Session'] = adminToken;
     return fetch(BASE + path, { method: opts.method || 'GET', headers: headers, body: opts.body, credentials: 'include', cache: 'no-store' })
       .then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { ok: r.ok, status: r.status, json: j, text: t }; }); });
   }
@@ -178,7 +176,7 @@
     var profiles = (data && data.profiles) || [];
     if (!data || data.error) {
       box.appendChild(el('p', { text: 'Список зрителей не открылся.' }));
-      box.appendChild(el('a', { href: '/profiles', text: 'Открыть страницу профилей' }));
+      box.appendChild(el('a', { href: '/profiles?next=/home', text: 'Открыть страницу профилей' }));
       return;
     }
     profiles.forEach(function (p) {
@@ -733,7 +731,7 @@
       if (r.some(function (x) { return x.status === 401 || (x.json && x.json.error === 'session_required'); })) {
         var box = sec('Нужен вход', 'сеанс профиля');
         box.appendChild(el('p', { text: 'Панель читает данные основного профиля. Откройте «Профили и вход», войдите в «Основной» и обновите эту страницу.' }));
-        box.appendChild(el('a', { href: '/profiles', text: 'Профили и вход' }));
+        box.appendChild(el('a', { href: '/profiles?next=/home', text: 'Профили и вход' }));
         return;
       }
       var J = function (i) { return (r[i] && r[i].json) || null; };
@@ -771,7 +769,9 @@
   setInterval(function () { document.getElementById('clock').textContent = new Date().toLocaleString('ru'); }, 1000);
   // Browser sessions do not have the Android bridge cookie. The same local
   // admin login used by /profiles can issue it without exposing the token to JS.
-  fetch('/home/admin/login', { method: 'POST', credentials: 'include', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: 'u_default', pin: '', device: 'web_panel', boot: 'panel-' + Date.now() }) }).then(function (r) { return r.json(); }).then(function (j) { adminToken = j.token || ''; load(); }).catch(function () { load(); });
+  // Browser sessions are HttpOnly cookies. Reuse a valid session; only ask the
+  // server to mint one when the current browser has none (and policy allows it).
+  fetch('/home/admin/session', { method: 'GET', credentials: 'include', cache: 'no-store' }).then(function () { load(); }).catch(function () { load(); });
 })();
 </script>
 </body>

@@ -225,4 +225,37 @@ CREATE TABLE IF NOT EXISTS kp_mirror_state(account TEXT,destination TEXT,content
         if(string.IsNullOrEmpty(token))ctx.Request.Cookies.TryGetValue("home_session",out token);
         return FromToken(token);
     }
+
+    // Independent browsers must not share a session identity. The cookie is the
+    // server-observed browser id; the client never supplies this value.
+    public static bool GenericBrowserDevice(string device) =>
+        device == "web_panel" || device == "web_profiles" || device == "web_admin";
+
+    public static string BrowserDevice(HttpContext ctx)
+    {
+        string current = ctx.Request.Cookies["home_web_device"];
+        if (!string.IsNullOrEmpty(current) && Regex.IsMatch(current, "^[A-Za-z0-9_-]{8,80}$")) return current;
+        string device = "web_" + Guid.NewGuid().ToString("N");
+        ctx.Response.Cookies.Append("home_web_device", device, new CookieOptions
+        {
+            HttpOnly = true,
+            IsEssential = true,
+            SameSite = SameSiteMode.Lax,
+            Path = "/",
+            MaxAge = TimeSpan.FromDays(365),
+            Secure = ctx.Request.IsHttps
+        });
+        return device;
+    }
+
+    public static void SetSessionCookie(HttpContext ctx, string token) =>
+        ctx.Response.Cookies.Append("home_session", token, new CookieOptions
+        {
+            HttpOnly = true,
+            IsEssential = true,
+            SameSite = SameSiteMode.Lax,
+            Path = "/",
+            MaxAge = TimeSpan.FromHours(24),
+            Secure = ctx.Request.IsHttps
+        });
 }

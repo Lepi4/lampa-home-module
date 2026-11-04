@@ -145,17 +145,18 @@ public class PanelController : BaseController
         // A browser has no Lampa device session. Do not rely on AsyncLocal
         // state here: it is empty on a fresh request even when another request
         // handled the same page. A missing cookie is the reliable boundary.
-        if (Profiles.Enabled && string.IsNullOrEmpty(Request.Cookies["home_session"]))
+        if (Profiles.Enabled)
         {
-            var admin = Profiles.Get(Profiles.DefaultId);
-            if (admin != null && (bool)admin["is_admin"] && !(bool)admin["is_child"] && !(bool)admin["archived"] && string.IsNullOrEmpty((string)admin["pin_hash"]))
+            var current = Profiles.FromRequest(HttpContext);
+            if (current == null)
             {
-                string device = Request.Cookies["home_web_device"];
-                if (string.IsNullOrEmpty(device) || !Regex.IsMatch(device, "^[A-Za-z0-9_-]{1,80}$")) device = "web_" + Guid.NewGuid().ToString("N");
-                var session = Profiles.CreateSession((string)admin["id"], device, Guid.NewGuid().ToString("N"));
-                var cookie = new CookieOptions { HttpOnly = true, IsEssential = true, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = TimeSpan.FromHours(24) };
-                Response.Cookies.Append("home_web_device", device, cookie);
-                Response.Cookies.Append("home_session", session.token, cookie);
+                var admin = Profiles.Get(Profiles.DefaultId);
+                if (admin != null && (bool)admin["is_admin"] && !(bool)admin["is_child"] && !(bool)admin["archived"] && string.IsNullOrEmpty((string)admin["pin_hash"]) && Guard.Ok(Request))
+                {
+                    string device = Profiles.BrowserDevice(HttpContext);
+                    var session = Profiles.CreateSession((string)admin["id"], device, Guid.NewGuid().ToString("N"));
+                    Profiles.SetSessionCookie(HttpContext, session.token);
+                }
             }
         }
         string dir = string.IsNullOrEmpty(ModInit.modpath) ? "/opt/lampac/mods/HomeMedia" : ModInit.modpath;
@@ -174,16 +175,13 @@ public class PanelController : BaseController
     {
         if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
         var current = Profiles.FromRequest(HttpContext);
-        if (current?.Admin == true) return Json(new { ok = true, profile = current.Id });
+        if (current != null) return current.Admin ? Json(new { ok = true, profile = current.Id }) : Json(new { error = "session_required" }, 401);
         var admin = Profiles.Get(Profiles.DefaultId);
         if (admin == null || !(bool)admin["is_admin"] || (bool)admin["is_child"] || (bool)admin["archived"] || !string.IsNullOrEmpty((string)admin["pin_hash"]))
             return Json(new { error = "session_required" }, 401);
-        string device = Request.Cookies["home_web_device"];
-        if (string.IsNullOrEmpty(device) || !Regex.IsMatch(device, "^[A-Za-z0-9_-]{1,80}$")) device = "web_" + Guid.NewGuid().ToString("N");
+        string device = Profiles.BrowserDevice(HttpContext);
         var session = Profiles.CreateSession((string)admin["id"], device, Guid.NewGuid().ToString("N"));
-        var cookie = new CookieOptions { HttpOnly = true, IsEssential = true, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = TimeSpan.FromHours(24) };
-        Response.Cookies.Append("home_web_device", device, cookie);
-        Response.Cookies.Append("home_session", session.token, cookie);
+        Profiles.SetSessionCookie(HttpContext, session.token);
         return Json(new { ok = true, profile = (string)admin["id"] });
     }
 

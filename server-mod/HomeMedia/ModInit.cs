@@ -39,11 +39,23 @@ public class ModInit : IModuleLoaded
                 e.httpContext.Response.WriteAsync("<!doctype html><meta http-equiv=\"refresh\" content=\"0;url="+target+"\">").GetAwaiter().GetResult();
                 return false;
             }
-            bool publicProfileRoute = requestedPath == "/home/profiles" || requestedPath == "/home/session/bootstrap" || requestedPath == "/home/session/login" || requestedPath == "/home/session/renew" || requestedPath == "/home/admin/login";
+            bool publicProfileRoute = requestedPath == "/home/profiles" || requestedPath == "/home/session/bootstrap" || requestedPath == "/home/session/login" || requestedPath == "/home/session/renew" || requestedPath == "/home/admin/login" || requestedPath == "/home/admin/session" || requestedPath == "/home/session/entry";
             bool personalRoute = requestedPath.StartsWith("/kp/") || requestedPath.StartsWith("/home/") || requestedPath.StartsWith("/anime/") || requestedPath.StartsWith("/yt/") || requestedPath.StartsWith("/local/") || requestedPath.StartsWith("/wrestling/") || requestedPath.StartsWith("/bookmark/") || requestedPath.StartsWith("/timecode/") || requestedPath.StartsWith("/storage/") || requestedPath.StartsWith("/tv/") || requestedPath.StartsWith("/ym/");
             // Media URLs remain LAN streams. Profile authorization applies to catalogs, selection and native launch, not to HLS segment requests.
             bool mediaRoute=requestedPath=="/wrestling/poster.svg"||requestedPath=="/wrestling/file"||requestedPath=="/home/wallpaper"||requestedPath.StartsWith("/kp/stream")||requestedPath=="/yt/p"||requestedPath.StartsWith("/anime/play")||requestedPath.StartsWith("/local/plex/file/")||requestedPath.StartsWith("/local/plex/hls/")||requestedPath=="/local/plex/seg";
             bool discoveryRoute = requestedPath.StartsWith("/home/app-updates/") || requestedPath == "/home/health" || requestedPath == "/home/whoami" || requestedPath == "/home/hello" || requestedPath == "/home/discover" || requestedPath == "/home/seed";
+            // Browser navigation to a service must lead to a login/recovery page, not raw JSON.
+            // API clients keep the machine-readable 401/403 below.
+            bool htmlNavigation = HttpMethods.IsGet(e.httpContext.Request.Method)
+                && e.httpContext.Request.Headers["Accept"].ToString().Contains("text/html", StringComparison.OrdinalIgnoreCase);
+            if (Profiles.Enabled && requestedPath.StartsWith("/home/services/", StringComparison.Ordinal) && htmlNavigation && user?.Admin != true)
+            {
+                string next = Uri.EscapeDataString(requestedPath + e.httpContext.Request.QueryString.Value);
+                e.httpContext.Response.StatusCode = 302;
+                e.httpContext.Response.Headers["Location"] = "/home/session/entry?next=" + next;
+                e.httpContext.Response.Headers["Cache-Control"] = "no-store";
+                return false;
+            }
             if (Profiles.Enabled && personalRoute && !publicProfileRoute && !discoveryRoute && !mediaRoute && user == null)
             {
                 e.httpContext.Response.StatusCode = 401;

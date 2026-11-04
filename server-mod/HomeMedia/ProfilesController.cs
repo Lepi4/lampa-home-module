@@ -20,6 +20,13 @@ public class ProfilesController : BaseController
     Profiles.Scope Viewer()=>Profiles.FromRequest(HttpContext);
     bool Admin()=>Guard.Ok(Request)&&Viewer()?.Admin==true;
     static bool IdOk(string s)=>Regex.IsMatch(s??"",@"^[A-Za-z0-9_-]{1,80}$");
+    static bool SafeNext(string value)
+    {
+        if(string.IsNullOrWhiteSpace(value)||value.Length>512)return false;
+        if(value!="/home"&&!value.StartsWith("/home/",StringComparison.Ordinal))return false;
+        if(value.StartsWith("//",StringComparison.Ordinal)||value.Contains('\\')||value.Contains('\r')||value.Contains('\n')||value.Contains(".."))return false;
+        return true;
+    }
     static object Session((string token,Profiles.Scope scope) s)=>new { token=s.token,profile=Profiles.Public(Profiles.Get(s.scope.Id)),expires_in=86400,server_id=HomeDb.Get("user_server_id"),profiles_enabled=Profiles.Enabled };
     static JObject BootProfile(string dev)
     {
@@ -91,6 +98,26 @@ public class ProfilesController : BaseController
     [HttpPost,AllowAnonymous,Route("home/session/logout")]
     public ActionResult Logout(){var u=Viewer();if(u!=null)HomeDb.With(c=>Profiles.Exec(c,"UPDATE user_sessions SET revoked=1 WHERE token_hash=@h",("@h",u.TokenHash)));return J(new {ok=true});}
 
+    [HttpGet,AllowAnonymous,Route("home/session/entry")]
+    public ActionResult Entry(string next)
+    {
+        if(!Guard.Ok(Request))return J(new{error="forbidden"},403);
+        string target=SafeNext(next)?next:"/home";
+        if(!Profiles.Enabled)return Redirect(target);
+        var current=Profiles.FromRequest(HttpContext);
+        if(current?.Admin==true)return Redirect(target);
+        if(current==null){
+            var admin=Profiles.Get(Profiles.DefaultId);
+            if(admin!=null&&(bool)admin["is_admin"]&&!(bool)admin["is_child"]&&!(bool)admin["archived"]&&string.IsNullOrEmpty((string)admin["pin_hash"])){
+                string device=Profiles.BrowserDevice(HttpContext);
+                var session=Profiles.CreateSession((string)admin["id"],device,Guid.NewGuid().ToString("N"));
+                Profiles.SetSessionCookie(HttpContext,session.token);
+                return Redirect(target);
+            }
+        }
+        return Redirect("/profiles?next="+Uri.EscapeDataString(target));
+    }
+
     [HttpPost,AllowAnonymous,Route("home/admin/login")]
     public async Task<ActionResult> Login()
     {
@@ -98,10 +125,15 @@ public class ProfilesController : BaseController
         try {
             var b=await Body();var p=Profiles.Get((string)b["profile_id"]??Profiles.MainId);
             if(p==null||!(bool)p["is_admin"]||(bool)p["is_child"]||(bool)p["archived"])return J(new {error="admin_required"},403);
-            string dev=(string)b["device"]??"web_admin",boot=(string)b["boot"]??Guid.NewGuid().ToString("N");
+            string requested=(string)b["device"];
+            string dev=!string.IsNullOrEmpty(requested)&&!Profiles.GenericBrowserDevice(requested)&&IdOk(requested)?requested:Profiles.BrowserDevice(HttpContext);
+            string boot=(string)b["boot"]??Guid.NewGuid().ToString("N");
             if(!IdOk(dev)||!IdOk(boot)||!Profiles.CheckPin(p,(string)b["pin"],dev,HttpContext.Connection.RemoteIpAddress?.ToString()))return J(new {error="pin_required_or_invalid"},403);
+            var current=Profiles.FromRequest(HttpContext);
+            if(current?.Admin==true&&current.Id==(string)p["id"]&&string.IsNullOrEmpty((string)b["pin"]))
+                return J(new {ok=true,reused=true,profile=Profiles.Public(p),profiles_enabled=Profiles.Enabled});
             var session=Profiles.CreateSession((string)p["id"],dev,boot);
-            Response.Cookies.Append("home_session",session.token,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/",MaxAge=TimeSpan.FromHours(24)});
+            Profiles.SetSessionCookie(HttpContext,session.token);
             return J(Session(session));
         }catch(Exception e){return J(new {error=e.Message},400);}
     }
@@ -206,10 +238,9 @@ public class ProfilesController : BaseController
         if(!Guard.Ok(Request))return J(new{error="forbidden"},403);
         var viewer=Viewer();string token=Request.Headers["X-Home-Session"].FirstOrDefault()??Request.Cookies["home_session"];
         if(viewer==null){var p=Profiles.Get(Profiles.DefaultId);if(!string.IsNullOrEmpty((string)p?["pin_hash"]))return Redirect("/profiles");
-            string device=Request.Cookies["home_web_device"];
-            if(string.IsNullOrEmpty(device)||!Regex.IsMatch(device,"^[A-Za-z0-9_-]{1,80}$"))device="web_"+Guid.NewGuid().ToString("N");
+            string device=Profiles.BrowserDevice(HttpContext);
             var session=Profiles.CreateSession(Profiles.DefaultId,device,Guid.NewGuid().ToString("N"));viewer=session.scope;token=session.token;
-            Response.Cookies.Append("home_web_device",device,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/"});Response.Cookies.Append("home_session",token,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/"});}
+            Profiles.SetSessionCookie(HttpContext,token);}
         string address=Request.Scheme+"://"+Request.Host;
         using var http=new System.Net.Http.HttpClient{Timeout=TimeSpan.FromSeconds(15)};using var request=new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get,"http://127.0.0.1:9118/"+Request.QueryString.Value);
         request.Headers.Host=Request.Host.Value;request.Headers.Add("X-Home-Session",token);request.Headers.Add("X-Home-Web-Render","1");
