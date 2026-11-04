@@ -126,16 +126,25 @@ CREATE TABLE IF NOT EXISTS kp_mirror_state(account TEXT,destination TEXT,content
     public static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text ?? "")));
     public static string NewToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     static readonly ConcurrentDictionary<string,(int n,long until)> failures = new();
+    static readonly object[] pinLocks = System.Linq.Enumerable.Range(0,64).Select(_=>new object()).ToArray();
     public static bool CheckPin(JObject target,string pin,string device,string remoteIp=null)
     {
-        // Ключ блокировки — серверно-наблюдаемый IP, а не клиентское поле device:
-        // иначе перебор PIN обходится сменой device в теле запроса.
-        string key=(string.IsNullOrEmpty(remoteIp)?device:remoteIp)+":"+(string)target["id"];long now=HomeDb.Now();
-        if(failures.TryGetValue(key,out var x)&&x.until>now&&x.n>=5)return false;
-        string stored=(string)target["pin_hash"];
-        bool ok=string.IsNullOrEmpty(stored)?string.IsNullOrEmpty(pin):VerifyPin(stored,pin);
-        if(ok)failures.TryRemove(key,out _);else failures.AddOrUpdate(key,(1,now+60_000),(_,v)=>v.until<now?(1,now+60_000):(v.n+1,now+60_000*(1L<<System.Math.Min(v.n,6))));
-        return ok;
+        // Ключ — серверно-наблюдаемый IP; без него — константа "unknown", но НЕ клиентский device
+        // (иначе смена device в теле запроса снова обнуляет лимит).
+        string key=(string.IsNullOrEmpty(remoteIp)?"unknown":remoteIp)+":"+(string)target["id"];long now=HomeDb.Now();
+        // Проверка и инкремент под замком (64 слота): иначе параллельный всплеск читает n<5
+        // и каждый запрос получает свою попытку без учёта (check-then-act).
+        lock(pinLocks[(key.GetHashCode()&0x7fffffff)%pinLocks.Length]){
+            if(failures.TryGetValue(key,out var x)){
+                if(x.until>now&&x.n>=5)return false;                 // ещё заблокирован
+                if(x.until>0&&x.until<=now)failures.TryRemove(key,out _); // окно истекло — счёт заново
+            }
+            string stored=(string)target["pin_hash"];
+            bool ok=string.IsNullOrEmpty(stored)?string.IsNullOrEmpty(pin):VerifyPin(stored,pin);
+            if(ok)failures.TryRemove(key,out _);
+            else{int n=(failures.TryGetValue(key,out var c)?c.n:0)+1;failures[key]=(n,n>=5?now+300_000:0L);} // 5-я ошибка — окно 5 мин
+            return ok;
+        }
     }
     public static string PinHash(string pin)
     {

@@ -249,6 +249,9 @@ public class ProfilesController : BaseController
             if(b["youtube_profile"]!=null){
                 string pack=(string)b["youtube_profile"];
                 if(!YtStore.CanAssign(user.Id,pack))return J(new{error="bad_youtube_profile"},400);
+                // Ребёнок не может назначить себе другой набор каналов: иначе через youtube_profile
+                // он расширяет свой allowlist чужим глобальным паком. Смена набора — только админ.
+                if(user.Child&&!string.Equals(pack,(string)cfg["youtube_profile"],System.StringComparison.Ordinal))return J(new{error="adult_required"},403);
                 cfg["youtube_profile"]=pack;
             }
             if(!user.Child){
