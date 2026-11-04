@@ -276,7 +276,10 @@ public static class TlV2
     public static int PurgeJournal(int days = 90)
     {
         if (HomeDb.SandboxId != null) return 0;
-        try { return HomeDb.With(c => HomeDb.Exec(c, "DELETE FROM tl_journal WHERE profile_id=@profile AND exported=1 AND at<@t", ("@t", HomeDb.Now() - days * 86400000L))); } catch { return -1; }
+        // Журнал отката глобальный: чистим выгруженные строки всех профилей, а не только текущего.
+        // Фоновый из Ops.Tick вызов идёт вне request-scope, где @profile = u_default, и строки
+        // не-основных профилей иначе никогда не удалялись.
+        try { return HomeDb.With(c => HomeDb.Exec(c, "DELETE FROM tl_journal WHERE exported=1 AND at<@t", ("@t", HomeDb.Now() - days * 86400000L))); } catch { return -1; }
     }
 
     // Приём тела запроса в любом из форматов: массив строк, {rows:[...]} или одна строка.

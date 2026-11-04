@@ -52,6 +52,10 @@ class ShellHost(private val a: MainActivity) : McHostApi {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun attach(startHidden: Boolean) {
+        // Документ стартует вместе с оболочкой: watchdog восстановления должен видеть startedAt,
+        // даже если корень Lampa не загрузился (сервер недоступен на холодном старте) — иначе
+        // needsRecovery() не срабатывает и приложение не восстанавливается до ручного перезапуска.
+        a.mcBeginDocument()
         web = WebView(a)
         web.setBackgroundColor(Color.BLACK)
         web.settings.apply {

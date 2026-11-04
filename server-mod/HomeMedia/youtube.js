@@ -93,7 +93,13 @@
 
   // ---------- профиль (набор каналов) ----------
   function boundPack() {
-    try { var p = window.HomeUser && HomeUser.owner.profile.settings && HomeUser.owner.profile.settings.youtube_profile; if (p) return p; } catch (e) {}
+    if (window.HomeUser) {
+      // Профиль без явного набора: пустая строка — сервер (ResolvePack) сам вернёт собственный
+      // набор профиля. Раньше здесь был 'main', и первый запрос после смены профиля уходил в
+      // чужой набор и давал ошибку до повторного открытия.
+      try { var s=HomeUser.owner.profile.settings||{}; if (s.youtube_profile) return s.youtube_profile; } catch (e) {}
+      return '';
+    }
     try { return localStorage.getItem('yt_profile') || 'main'; } catch (e2) { return 'main'; }
   }
   function profile() { return boundPack(); }

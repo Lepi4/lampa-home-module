@@ -52,7 +52,7 @@ public class ProfilesController : BaseController
             if(!IdOk(dev)||!IdOk(boot))return J(new {error="device_and_boot_required"},400);
             var p=Request.Path.Value.EndsWith("/login",StringComparison.Ordinal)?Profiles.Get((string)b["profile_id"]):BootProfile(dev);
             if(p==null||(bool)p["archived"])return J(new {error="invalid_profile"},404);
-            if(!string.IsNullOrEmpty((string)p["pin_hash"])&&(b["pin"]==null||!Profiles.CheckPin(p,(string)b["pin"],dev)))return J(new {locked=true,profile=new {id=(string)p["id"],name=(string)p["name"]}});
+            if(!string.IsNullOrEmpty((string)p["pin_hash"])&&(b["pin"]==null||!Profiles.CheckPin(p,(string)b["pin"],dev,HttpContext.Connection.RemoteIpAddress?.ToString())))return J(new {locked=true,profile=new {id=(string)p["id"],name=(string)p["name"]}});
             return J(Session(Profiles.CreateSession((string)p["id"],dev,boot)));
         }catch(Exception e){return J(new {error=e.Message},400);}
     }
@@ -63,7 +63,7 @@ public class ProfilesController : BaseController
         try {
             var b=await Body();var p=Profiles.Get((string)b["profile_id"]);
             if(p==null||(bool)p["archived"])return J(new {error="unknown_profile"},404);
-            if(!(bool)p["is_child"]&&!string.IsNullOrEmpty((string)p["pin_hash"])&&!Profiles.CheckPin(p,(string)b["pin"],from.Device))return J(new {error="pin_required_or_invalid"},403);
+            if(!(bool)p["is_child"]&&!string.IsNullOrEmpty((string)p["pin_hash"])&&!Profiles.CheckPin(p,(string)b["pin"],from.Device,HttpContext.Connection.RemoteIpAddress?.ToString()))return J(new {error="pin_required_or_invalid"},403);
             return J(Session(Profiles.CreateSession((string)p["id"],from.Device,from.Boot,from.TokenHash)));
         }catch(Exception e){return J(new {error=e.Message},409);}
     }
@@ -99,7 +99,7 @@ public class ProfilesController : BaseController
             var b=await Body();var p=Profiles.Get((string)b["profile_id"]??Profiles.MainId);
             if(p==null||!(bool)p["is_admin"]||(bool)p["is_child"]||(bool)p["archived"])return J(new {error="admin_required"},403);
             string dev=(string)b["device"]??"web_admin",boot=(string)b["boot"]??Guid.NewGuid().ToString("N");
-            if(!IdOk(dev)||!IdOk(boot)||!Profiles.CheckPin(p,(string)b["pin"],dev))return J(new {error="pin_required_or_invalid"},403);
+            if(!IdOk(dev)||!IdOk(boot)||!Profiles.CheckPin(p,(string)b["pin"],dev,HttpContext.Connection.RemoteIpAddress?.ToString()))return J(new {error="pin_required_or_invalid"},403);
             var session=Profiles.CreateSession((string)p["id"],dev,boot);
             Response.Cookies.Append("home_session",session.token,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/",MaxAge=TimeSpan.FromHours(24)});
             return J(Session(session));
