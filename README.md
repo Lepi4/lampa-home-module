@@ -21,6 +21,8 @@ Android-приложение LMPC Media Center — форк [lampa-app/LAMPA (Gi
 | [Channel Manager](https://gitverse.ru/Lepi4/lmpc-channel-manager) | Каналы и их источники, M3U, XMLTV/EPG, приоритеты и резервирование, буферизация и дополнительная обработка ТВ-потоков. Может работать отдельным сервисом либо рядом с Lampac в одном контейнере. |
 | TorrServer | Получение и передача торрент-потоков клиентскому плееру. Это отдельный сервис, который может быть установлен рядом с Lampac. |
 
+Tvheadend — сторонний сервис: HomeMedia только проксирует его интерфейс по относительному пути; Tvheadend сохраняет собственную авторизацию, а LMPC не обновляет и не настраивает его.
+
 [Подробно: возможности APK, функции сервера и их взаимодействие](FEATURES.md).
 
 ## Скриншоты APK
@@ -62,7 +64,7 @@ APK и сервер работают вместе: приложение пока
 python3 deploy/deploy-module.py \
   --url http://192.168.1.80:9118 \
   --profile-id u_default \
-  --package release/2026.11.03.1/homemedia.tar.gz
+  --package release/2026.11.04.4/homemedia.tar.gz
 ```
 
 Скрипт получает короткий администраторский сеанс, загружает пакет, ждёт проверку совместимости, запускает штатную замену и ждёт результат. Worker создаёт резервную копию перед заменой; откат выполняется кнопкой `rollback` в панели. Для подготовки без применения используйте `--no-apply`.
@@ -71,10 +73,10 @@ python3 deploy/deploy-module.py \
 
 ## Android
 
-Готовая сборка: `release/apk-1138/LMPC-1.16.20-1138.apk`.
+Готовая сборка: `release/2026.11.04.4/LMPC-1.16.22-1140.apk`.
 
 ```bash
-adb install -r release/apk-1138/LMPC-1.16.20-1138.apk
+adb install -r release/2026.11.04.4/LMPC-1.16.22-1140.apk
 ```
 
 **[Исходный код APK находится в LAMPA/](LAMPA/)**: код приложения, ресурсы и файлы Gradle опубликованы вместе с медиасерверным модулем. [Происхождение кода, состав исходников и сборка](ANDROID-SOURCE.md).
@@ -83,7 +85,7 @@ adb install -r release/apk-1138/LMPC-1.16.20-1138.apk
 
 ```bash
 cd LAMPA
-./gradlew assembleMcRelease -PappVersionCode=1134 -PappVersionName=1.16.16
+./gradlew assembleMcRelease -PappVersionCode=1140 -PappVersionName=1.16.22
 ```
 
 Подпись и keystore намеренно не входят в публичный пакет. Не публикуйте `.env`, токены, cookies, базы данных или резервные копии.
@@ -94,11 +96,11 @@ cd LAMPA
 
 ## Релиз
 
-- HomeMedia: `2026.11.03.1`
-- APK: `1.16.20-mc`, versionCode `1134`
-- SHA-256 APK: `f1d0ea88fb9ecfbeedf2a3d14336a3c862525a5c735fc8d88b555bc672d3f80e`
+- HomeMedia: `2026.11.04.4`
+- APK: `1.16.22-mc`, versionCode `1140`
+- SHA-256 APK: `1734bc97256418dc9ac0b35514936442c34fe4bb95a8d021ab29f41227ec760a`
 
-Пакет последнего релиза: `release/2026.11.03.1/homemedia.tar.gz`.
+Пакет последнего релиза: `release/2026.11.04.4/homemedia.tar.gz`.
 
 Прокси редактируются прямо в разделах YouTube, Кинопаба и состояния сервера в `/home`: поле адреса, «Без прокси», «Проверить», «Сохранить». [Инструкция](docs/PROXY.md).
 Ссылки Channel Manager, TorrServer и Tvheadend открываются относительно панели через контейнер.

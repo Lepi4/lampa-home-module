@@ -92,3 +92,7 @@ WebSocket/SSE-сеансы не подтверждены. HTTP-передача 
 
 Новая APK не требуется: текущая 1132 остаётся прежней. Mihomo, его правила,
 Homepage CT120 и конфигурации самих трёх служб не изменялись.
+
+## Обновление 04.11.2026: base Tvheadend
+
+Найден и исправлен дефект `ServiceUiController.Rewrite`: прокси вставлял новый `<base>` перед существующим, поэтому браузер использовал `/home/services/tvheadend/` вместо `/home/services/tvheadend/gui/static/`, а модули и CSS уходили в несуществующий `/assets/...`. Теперь существующий `base href` привязывается к mount-префиксу, fallback добавляется только при отсутствии href, относительный base разрешается от исходного пути страницы. Проверены Tvheadend, Channel Manager и TorrServer; ассеты Tvheadend загружаются с `/home/services/tvheadend/gui/static/assets/...` (200), интерфейс открывается. Проверка выполнена 04.11.2026; APK, Tvheadend и Channel Manager не менялись.

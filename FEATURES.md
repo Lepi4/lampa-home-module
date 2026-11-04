@@ -65,3 +65,7 @@ Channel Manager отвечает за приоритеты источников,
 - [Отдельный репозиторий Channel Manager](https://gitverse.ru/Lepi4/lmpc-channel-manager).
 
 Условия собственного кода Lepi4 и исключения для сторонних компонентов описаны в [LICENSE-SCOPE.md](LICENSE-SCOPE.md).
+
+## Tvheadend
+
+Tvheadend — сторонний сервис, который можно открыть через панель HomeMedia по относительному пути `/home/services/tvheadend/gui/`. HomeMedia проксирует его HTML, статические ресурсы, API и WebSocket, сохраняя существующий `<base>` и собственную авторизацию Tvheadend. LMPC не обновляет Tvheadend, не управляет его тюнерами, записями и учётными записями; в документации обновлений он остаётся в режиме мониторинга.
