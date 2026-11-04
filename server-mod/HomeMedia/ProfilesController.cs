@@ -203,9 +203,12 @@ public class ProfilesController : BaseController
     public async Task<ActionResult> WebLampa()
     {
         if(!Profiles.Enabled)return Redirect("/");
+        if(!Guard.Ok(Request))return J(new{error="forbidden"},403);
         var viewer=Viewer();string token=Request.Headers["X-Home-Session"].FirstOrDefault()??Request.Cookies["home_session"];
         if(viewer==null){var p=Profiles.Get(Profiles.DefaultId);if(!string.IsNullOrEmpty((string)p?["pin_hash"]))return Redirect("/profiles");
-            string device=Request.Cookies["home_web_device"]??"web_"+Guid.NewGuid().ToString("N");var session=Profiles.CreateSession(Profiles.DefaultId,device,Guid.NewGuid().ToString("N"));viewer=session.scope;token=session.token;
+            string device=Request.Cookies["home_web_device"];
+            if(string.IsNullOrEmpty(device)||!Regex.IsMatch(device,"^[A-Za-z0-9_-]{1,80}$"))device="web_"+Guid.NewGuid().ToString("N");
+            var session=Profiles.CreateSession(Profiles.DefaultId,device,Guid.NewGuid().ToString("N"));viewer=session.scope;token=session.token;
             Response.Cookies.Append("home_web_device",device,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/"});Response.Cookies.Append("home_session",token,new CookieOptions{HttpOnly=true,IsEssential=true,SameSite=SameSiteMode.Lax,Path="/"});}
         string address=Request.Scheme+"://"+Request.Host;
         using var http=new System.Net.Http.HttpClient{Timeout=TimeSpan.FromSeconds(15)};using var request=new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get,"http://127.0.0.1:9118/"+Request.QueryString.Value);

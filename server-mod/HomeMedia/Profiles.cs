@@ -132,19 +132,27 @@ CREATE TABLE IF NOT EXISTS kp_mirror_state(account TEXT,destination TEXT,content
         // Ключ — серверно-наблюдаемый IP; без него — константа "unknown", но НЕ клиентский device
         // (иначе смена device в теле запроса снова обнуляет лимит).
         string key=(string.IsNullOrEmpty(remoteIp)?"unknown":remoteIp)+":"+(string)target["id"];long now=HomeDb.Now();
-        // Проверка и инкремент под замком (64 слота): иначе параллельный всплеск читает n<5
-        // и каждый запрос получает свою попытку без учёта (check-then-act).
+        bool grant;
+        // Под замком только быстрый резерв попытки (check-then-act закрыт); PBKDF2 выполняется вне замка,
+        // чтобы массовая ротация ключей не зажимала общие слоты дорогой проверкой.
         lock(pinLocks[(key.GetHashCode()&0x7fffffff)%pinLocks.Length]){
             if(failures.TryGetValue(key,out var x)){
-                if(x.until>now&&x.n>=5)return false;                 // ещё заблокирован
-                if(x.until>0&&x.until<=now)failures.TryRemove(key,out _); // окно истекло — счёт заново
-            }
-            string stored=(string)target["pin_hash"];
-            bool ok=string.IsNullOrEmpty(stored)?string.IsNullOrEmpty(pin):VerifyPin(stored,pin);
-            if(ok)failures.TryRemove(key,out _);
-            else{int n=(failures.TryGetValue(key,out var c)?c.n:0)+1;failures[key]=(n,n>=5?now+300_000:0L);} // 5-я ошибка — окно 5 мин
-            return ok;
+                if(x.until>now&&x.n>=5){grant=false;}
+                else{
+                    if(x.until>0&&x.until<=now)failures.TryRemove(key,out _); // окно истекло — счёт заново
+                    int n=(failures.TryGetValue(key,out var c)?c.n:0)+1;
+                    failures[key]=(n,n>=5?now+300_000:0L);
+                    grant=n<=5;
+                }
+            }else{failures[key]=(1,0L);grant=true;}
+            // ограничение роста словаря: иначе ротация ключей копит записи без границы
+            if(failures.Count>4096)foreach(var k in failures.Where(p=>p.Value.until<=now).Select(p=>p.Key).ToList())failures.TryRemove(k,out _);
         }
+        if(!grant)return false;
+        string stored=(string)target["pin_hash"];
+        bool ok=string.IsNullOrEmpty(stored)?string.IsNullOrEmpty(pin):VerifyPin(stored,pin);
+        if(ok)failures.TryRemove(key,out _);
+        return ok;
     }
     public static string PinHash(string pin)
     {
