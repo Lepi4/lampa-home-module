@@ -70,7 +70,10 @@ public static class ProfileAvailability
         long id=(long?)card["id"]??0;
         string title=(string)(card["original_name"]??card["name"])??"";
         int eligible=0;
+        bool trustKinopub=ReleasePolicy.TrustKinopubAudio;
         foreach(var ep in unseen){
+            // available — это файлы KinoPub; для него не спрашиваем торрент-индекс.
+            if(trustKinopub){eligible++;continue;}
             bool? ru=ReleasePolicy.EpisodeRu("tv",id,ep.Item1,ep.Item2);
             if(ru==null){_=ReleaseIndexer.Ensure("tv",id,title);eligible++;continue;}
             if(ru!=false)eligible++;

@@ -31,6 +31,13 @@ public static class ReleasePolicy
 
     public static bool AllowSubtitlesOnly => AllowSubtitlesOnlyFor(Profiles.CurrentId);
 
+    // KinoPub — русскоязычный источник: его файлы считаются русской озвучкой,
+    // даже если торрент-индекс для этой серии молчит или видит только СТ.
+    public static bool TrustKinopubAudioFor(string profileId) =>
+        (bool?)SettingsFor(profileId)["kinopub_ru_audio"] != false;
+
+    public static bool TrustKinopubAudio => TrustKinopubAudioFor(Profiles.CurrentId);
+
     public static string NormType(string t)
     {
         if (string.IsNullOrWhiteSpace(t)) return "";
@@ -199,9 +206,11 @@ public static class ReleasePolicy
     public static bool? EpisodeRu(string media, long tmdb, int season, int episode)
     {
         var row = HomeDb.With(c => HomeDb.Query(c,
-            "SELECT has_ru FROM release_episodes WHERE profile_id=@p AND media=@m AND tmdb=@t AND season=@s AND episode=@e",
+            "SELECT has_ru,checked_at FROM release_episodes WHERE profile_id=@p AND media=@m AND tmdb=@t AND season=@s AND episode=@e",
             ("@p", Profiles.CurrentId), ("@m", media), ("@t", tmdb), ("@s", season), ("@e", episode))).FirstOrDefault();
-        return row == null ? null : Convert.ToInt64(row[0]) != 0;
+        // checked_at=0 — классификатор ещё не проверял серию; это unknown, а не «нет русской озвучки».
+        if (row == null || Convert.ToInt64(row[1]) <= 0) return null;
+        return Convert.ToInt64(row[0]) != 0;
     }
 }
 

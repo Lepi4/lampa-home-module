@@ -289,7 +289,7 @@ public class ProfilesController : BaseController
                 cfg["youtube_profile"]=pack;
             }
             if(!user.Child){
-                foreach(string key in new[]{"torrent_auto","torrent_max_height","torrent_min_seeds","torrent_allow_hevc","torrent_allow_hdr","allow_subtitles_only","feed_block_quality"})if(b[key]!=null)cfg[key]=b[key];
+                foreach(string key in new[]{"torrent_auto","torrent_max_height","torrent_min_seeds","torrent_allow_hevc","torrent_allow_hdr","allow_subtitles_only","kinopub_ru_audio","feed_block_quality"})if(b[key]!=null)cfg[key]=b[key];
             }else if(b["youtube_profile"]==null||b.Properties().Any(p=>p.Name!="youtube_profile"))return J(new{error="adult_required"},403);
             HomeDb.With(c=>Profiles.Exec(c,"UPDATE user_profiles SET settings=@j WHERE id=@p",("@j",cfg.ToString(Formatting.None)),("@p",user.Id)));
         }
@@ -342,6 +342,7 @@ public class ProfilesController : BaseController
             if(cfg["torrent_auto"]==null)cfg["torrent_auto"]=false;
             if(cfg["allow_subtitles_only"]==null)cfg["allow_subtitles_only"]=false;
             if(cfg["allow_subtitles_only"].Type!=JTokenType.Boolean)return J(new{error="bad_allow_subtitles_only"},400);
+            if(cfg["kinopub_ru_audio"]!=null&&cfg["kinopub_ru_audio"].Type!=JTokenType.Boolean)return J(new{error="bad_kinopub_ru_audio"},400);
             if(cfg["feed_block_quality"]==null)cfg["feed_block_quality"]=new JArray();
             if(cfg["feed_block_quality"] is not JArray bq || bq.Any(x=>x.Type!=JTokenType.String||!ReleasePolicy.AllowedType((string)x)))return J(new{error="bad_feed_block_quality"},400);
             if(cfg["youtube_mode"]==null)cfg["youtube_mode"]=child&&age==6?"channels":"normal";
