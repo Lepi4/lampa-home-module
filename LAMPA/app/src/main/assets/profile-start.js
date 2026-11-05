@@ -100,7 +100,7 @@ function init(){
  }
  if(profile.is_child){var originalSet=Lampa.Storage.set;Lampa.Storage.set=function(k,v){if(k==='source')v='tmdb';return originalSet.call(this,k,v);};Lampa.Storage.set('source','tmdb');}
 
- var cfg=profile.settings||{}, generation=0, pendingAuto=null, pendingRetry=null, manualUntil=0, autoTimer=null, autoPlaybackPending=false, torrentProgressUi=null, torrentProgressTimer=null;
+ var cfg=profile.settings||{}, allowSubtitlesOnly=cfg.allow_subtitles_only===true, feedBlock=cfg.feed_block_quality||[], generation=0, pendingAuto=null, pendingRetry=null, manualUntil=0, autoTimer=null, autoPlaybackPending=false, torrentProgressUi=null, torrentProgressTimer=null;
  function torrentProgressStyle(){
   if(typeof document==='undefined'||document.getElementById('home-torrent-progress-style'))return;
   var style=document.createElement('style');style.id='home-torrent-progress-style';style.textContent='.home-torrent-progress{position:fixed;left:50%;bottom:7.5%;transform:translateX(-50%);z-index:2147483000;width:min(560px,82vw);padding:16px 20px 14px;border-radius:12px;background:rgba(18,20,25,.96);box-shadow:0 5px 28px rgba(0,0,0,.5);color:#fff;font:500 16px/1.35 sans-serif;pointer-events:none}.home-torrent-progress__row{display:flex;align-items:center;gap:11px}.home-torrent-progress__spinner{width:17px;height:17px;border:2px solid rgba(255,255,255,.28);border-top-color:#fff;border-radius:50%;animation:home-torrent-spin .8s linear infinite;flex:none}.home-torrent-progress__detail{margin-top:7px;color:rgba(255,255,255,.72);font-size:13px}.home-torrent-progress__track{height:4px;margin-top:12px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,.18)}.home-torrent-progress__bar{height:100%;width:38%;border-radius:4px;background:#4da3ff;animation:home-torrent-slide 1.25s ease-in-out infinite}@keyframes home-torrent-spin{to{transform:rotate(360deg)}}@keyframes home-torrent-slide{0%{transform:translateX(-150%)}50%{transform:translateX(90%)}100%{transform:translateX(270%)}}';document.head&&document.head.appendChild(style);
@@ -156,6 +156,8 @@ function init(){
  function allows(mode, hit){if(mode==='any')return true;return mode==='only'?hit:!hit;}
  function eligible(e){var title=e.Title||e.title||'',h=/2160|4k|uhd/i.test(title)?2160:/1080/i.test(title)?1080:/720/i.test(title)?720:/480|576/i.test(title)?480:0;
    var hevc=/hevc|h[ .]?265|x265/i.test(title),hdr=/(?:^|[^a-z0-9])hdr(?:10)?\+?(?![a-z])/i.test(title)||/dolby[ .]?vision|\bdv\b/i.test(title);
+   var subsOnly=/\bСТ\b|\[СТ\]|\bSub\b|\bSUB\b|субтитр/i.test(title)&&!/Дубл|дубл|MVO|DVO|AVO|озвуч|Озвуч|Многоголос|Закадров|\bDUB\b|\bRUS\b|\bрус/i.test(title);
+   if(subsOnly&&!allowSubtitlesOnly)return false;
    return h>0&&h<=(+cfg.torrent_max_height||1080)&&+(e.Seeders!=null?e.Seeders:e.Seeds||0)>=(+cfg.torrent_min_seeds||5)&&allows(codecMode(cfg.torrent_allow_hevc,'any'),hevc)&&allows(codecMode(cfg.torrent_allow_hdr,'no'),hdr);
  }
  Lampa.Activity.push=function(object){if(!cfg.torrent_auto||object.component!=='torrents'||Date.now()<manualUntil)return push.apply(this,arguments);

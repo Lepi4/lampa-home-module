@@ -97,7 +97,7 @@ function init(){
  }
  if(profile.is_child){var originalSet=Lampa.Storage.set;Lampa.Storage.set=function(k,v){if(k==='source')v='tmdb';return originalSet.call(this,k,v);};Lampa.Storage.set('source','tmdb');}
 
- var cfg=profile.settings||{}, generation=0, pendingAuto=null, pendingRetry=null, manualUntil=0, autoTimer=null, autoPlaybackPending=false;
+ var cfg=profile.settings||{}, allowSubtitlesOnly=cfg.allow_subtitles_only===true, feedBlock=cfg.feed_block_quality||[], generation=0, pendingAuto=null, pendingRetry=null, manualUntil=0, autoTimer=null, autoPlaybackPending=false;
  function cancelAuto(){generation++;pendingAuto=null;pendingRetry=null;autoPlaybackPending=false;clearTimeout(autoTimer);}
  Lampa.Activity.listener.follow('popstate',cancelAuto);Lampa.Listener.follow('activity',function(e){if(e.type==='init')cancelAuto();});
  if(Lampa.Player&&Lampa.Player.play){var originalPlay=Lampa.Player.play;
@@ -134,6 +134,8 @@ function init(){
  function allows(mode, hit){if(mode==='any')return true;return mode==='only'?hit:!hit;}
  function eligible(e){var title=e.Title||e.title||'',h=/2160|4k|uhd/i.test(title)?2160:/1080/i.test(title)?1080:/720/i.test(title)?720:/480|576/i.test(title)?480:0;
    var hevc=/hevc|h[ .]?265|x265/i.test(title),hdr=/(?:^|[^a-z0-9])hdr(?:10)?\+?(?![a-z])/i.test(title)||/dolby[ .]?vision|\bdv\b/i.test(title);
+   var subsOnly=/\bСТ\b|\[СТ\]|\bSub\b|\bSUB\b|субтитр/i.test(title)&&!/Дубл|дубл|MVO|DVO|AVO|озвуч|Озвуч|Многоголос|Закадров|\bDUB\b|\bRUS\b|\bрус/i.test(title);
+   if(subsOnly&&!allowSubtitlesOnly)return false;
    return h>0&&h<=(+cfg.torrent_max_height||1080)&&+(e.Seeders!=null?e.Seeders:e.Seeds||0)>=(+cfg.torrent_min_seeds||5)&&allows(codecMode(cfg.torrent_allow_hevc,'any'),hevc)&&allows(codecMode(cfg.torrent_allow_hdr,'no'),hdr);
  }
  Lampa.Activity.push=function(object){if(!cfg.torrent_auto||object.component!=='torrents'||Date.now()<manualUntil)return push.apply(this,arguments);

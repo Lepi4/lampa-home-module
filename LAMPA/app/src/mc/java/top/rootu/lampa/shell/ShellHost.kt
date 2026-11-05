@@ -220,6 +220,8 @@ class ShellHost(private val a: MainActivity) : McHostApi {
         }
 
         @JavascriptInterface fun server(): String = a.appUrl
+        @JavascriptInterface fun appVersion(): String =
+            top.rootu.lampa.BuildConfig.VERSION_NAME + " / " + top.rootu.lampa.BuildConfig.VERSION_CODE
         @JavascriptInterface fun setAfrMode(enabled: Boolean) {
             top.rootu.lampa.player.PlayerSettingsStore.acceptAfr(a, enabled)
         }

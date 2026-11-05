@@ -46,6 +46,7 @@ public static class ProfileAvailability
             if(kp<=0||!cache.TryGetValue(account+":"+kp,out var hit))continue;
             watched.TryGetValue(id,out var seen);
             card["kp_new"]=hit.set.Count(x=>seen==null||!seen.Contains(x));
+            await SuppressSubtitlesOnlyNew(card,hit.set,seen);
         }
     }
     public static async Task Enrich(JArray cards,string token,string account)
@@ -55,6 +56,23 @@ public static class ProfileAvailability
             long id=(long?)card["id"]??0,kp=(long?)card["kp_id"]??KpMap.CachedKp("tv",id);if(kp<=0)return;
             var available=await Available(kp,token,account);if(available==null)return;
             watched.TryGetValue(id,out var seen);card["kp_new"]=available.Count(x=>seen==null||!seen.Contains(x));
+            await SuppressSubtitlesOnlyNew(card,available,seen);
         }));
+    }
+
+    // If the newest unseen episode exists only as СТ/Sub, do not trigger «новая серия»
+    // in watching/watching_anime/watching_cartoons. Unknown source => keep the badge.
+    static async Task SuppressSubtitlesOnlyNew(JObject card,HashSet<(int,int)> available,HashSet<(int,int)> seen)
+    {
+        if(ReleasePolicy.AllowSubtitlesOnly)return;
+        if(((int?)card["kp_new"]??0)<=0)return;
+        var latest=available.Where(e=>seen==null||!seen.Contains(e))
+            .OrderByDescending(e=>e.Item1).ThenByDescending(e=>e.Item2).FirstOrDefault();
+        if(latest.Item1<=0||latest.Item2<=0)return;
+        long id=(long?)card["id"]??0;
+        string title=(string)(card["original_name"]??card["name"])??"";
+        bool? ru=ReleasePolicy.EpisodeRu("tv",id,latest.Item1,latest.Item2);
+        if(ru==null)_=ReleaseIndexer.Ensure("tv",id,title);
+        else if(ru==false)card["kp_new"]=0;
     }
 }

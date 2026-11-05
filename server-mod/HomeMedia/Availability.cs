@@ -122,10 +122,17 @@ public static class Availability
                 if (!int.TryParse((string)r["Seeders"] ?? "0", out int seeders) || seeders <= 0) continue;
                 string title = (string)r["Title"] ?? "";
                 if (!TitleMatch(q, title)) continue;
+                if (ReleasePolicy.Hide(r)) continue;              // только субтитры, настройка выключена
+                if (ReleasePolicy.BlockedQuality(r)) continue;    // тип качества в чёрном списке лент
                 bool ruOrig = (string)c["original_language"] == "ru";   // российское: озвучка родная, достаточно живой раздачи
                 bool rus = ruOrig || (r["languages"] is JArray l && l.Any(x => (string)x == "rus"));
                 bool voices = r["info"]?["voices"] is JArray v && v.Count > 0;
-                if (rus || voices || reVoice.IsMatch(title)) return true;
+                if (rus || voices || reVoice.IsMatch(title))
+                {
+                    string media = (string)c["media_type"] ?? ((c["name"] != null || c["original_name"] != null) ? "tv" : "movie");
+                    ReleasePolicy.Track(media, (long?)c["id"] ?? 0, title);
+                    return true;
+                }
             }
         }
         return false;

@@ -281,7 +281,15 @@ public static class KpUnified
     static string SortKey(JObject c)
     {
         string a = DateOf(c), b = (string)c["kp_added"] ?? "";
-        return string.CompareOrdinal(a, b) >= 0 ? a : b;
+        string key = string.CompareOrdinal(a, b) >= 0 ? a : b;
+        string media = (string)c["media_type"] ?? ((c["name"] != null || c["original_name"] != null) ? "tv" : "movie");
+        long? bump = ReleasePolicy.BumpAt(media, (long?)c["id"] ?? 0);
+        if (bump != null)
+        {
+            string d = DateTimeOffset.FromUnixTimeMilliseconds(bump.Value).UtcDateTime.ToString("yyyy-MM-dd");
+            if (string.CompareOrdinal(d, key) > 0) key = d;
+        }
+        return key;
     }
 
     static string DateOf(JObject c) => (string)c["release_date"] ?? (string)c["first_air_date"] ?? "";

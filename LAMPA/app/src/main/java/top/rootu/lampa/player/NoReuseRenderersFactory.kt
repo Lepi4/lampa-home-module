@@ -5,10 +5,12 @@ import android.os.Handler
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.exoplayer.audio.AudioOffloadSupport
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.ForwardingAudioSink
 import androidx.media3.exoplayer.audio.AudioCapabilities
+import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
@@ -67,6 +69,34 @@ class NoReuseRenderersFactory(context: Context, private val drc: DrcAudioProcess
                 super.configure(inputFormat, specifiedBufferSize, outputChannels)
             }
         }
+    }
+
+    override fun buildAudioRenderers(
+        context: Context,
+        extensionRendererMode: Int,
+        mediaCodecSelector: MediaCodecSelector,
+        enableDecoderFallback: Boolean,
+        audioSink: AudioSink,
+        eventHandler: Handler,
+        eventListener: AudioRendererEventListener,
+        out: ArrayList<Renderer>
+    ) {
+        super.buildAudioRenderers(
+            context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
+            audioSink, eventHandler, eventListener, out
+        )
+        if (allowPassthrough) return
+        // E-AC3/AC3 без проброса: программный FFmpeg декодирует в PCM в тот же
+        // DRC-совместимый sink. Ставим его первым, чтобы MediaCodec приставки
+        // не выбирал «поддерживаемый» E-AC3, который затем молчит.
+        val softwareSink = buildAudioSink(context, false, false)
+        val existing = out.indexOfFirst { it is FfmpegAudioRenderer }
+        if (existing >= 0) {
+            if (existing != 0) out.add(0, out.removeAt(existing))
+        } else {
+            out.add(0, FfmpegAudioRenderer(eventHandler, eventListener, softwareSink))
+        }
+        android.util.Log.i("HomeAudio", "exo_software_eac3 renderer=ffmpeg passthrough=false")
     }
 
     override fun buildVideoRenderers(

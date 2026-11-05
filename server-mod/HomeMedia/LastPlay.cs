@@ -132,7 +132,7 @@ public class LastPlayController : BaseController
 
     [HttpGet, AllowAnonymous]
     [Route("home/lastplay/get")]
-    public ActionResult GetOne(string card = null, string sbx = null)
+    public async Task<ActionResult> GetOne(string card = null, string sbx = null)
     {
         if (string.IsNullOrEmpty(card) || !keyRx.IsMatch(card)) return Json(new { }, 400);
         if (!string.IsNullOrEmpty(sbx) && !Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
@@ -140,6 +140,19 @@ public class LastPlayController : BaseController
         try { sb = HomeDb.Enter(sbx); } catch { return Json(new { error = "no sandbox" }, 404); }
         using var _sb = sb;
         var rec = LastPlayStore.Get(card);
+        if (rec != null && card.EndsWith("_tv", StringComparison.Ordinal) && !ReleasePolicy.AllowSubtitlesOnly)
+        {
+            int s = (int?)rec["season"] ?? 0;
+            int e = (int?)rec["ep"] ?? 0;
+            long tm = long.TryParse(card.Split('_')[0], out var id) ? id : 0;
+            string title = (string)rec["title"] ?? "";
+            if (s > 0 && e > 0 && tm > 0)
+            {
+                bool? ru = ReleasePolicy.EpisodeRu("tv", tm, s, e);
+                if (ru == null) _ = ReleaseIndexer.Ensure("tv", tm, title);
+                else if (ru == false) rec["no_ru_audio"] = true;
+            }
+        }
         // карточку открыли: заранее собираем варианты («лучшее качество», озвучки), к моменту нажатия кнопки они уже готовы
         try
         {

@@ -110,7 +110,9 @@ class HomePlayerActivity : Activity() {
             }
         }
     }
-    private var firstFrameSeen = false
+    private val frameGate = VideoFrameGate()
+    private val firstFrameSeen get() = frameGate.hasFrame()
+    private var frameWatchdogHits = 0
     private var bufferStartedAt = 0L
     private var spinnerWasShown = false
     private var tvNowUrl: String? = null
@@ -121,7 +123,11 @@ class HomePlayerActivity : Activity() {
     private var panel: LinearLayout? = null
     private var chList: ListView? = null
     private var panelOpen = false
-    private var liveRetries = 0
+    private var liveIndex = 0
+    private var liveEpoch = 0
+    private var pendingLiveRetry: Runnable? = null
+    private val liveRetry = LiveRetryPolicy()
+    private var liveItems: List<MediaItem> = emptyList()
     private var decoderRetried = false
     private lateinit var srcBtn: TextView
     private var forcedIdx = -1          // позиция в списке, где выбран источник вручную
@@ -145,7 +151,10 @@ class HomePlayerActivity : Activity() {
         val n = digits.toIntOrNull()
         digits = ""
         statusView.text = ""
-        if (n != null && n >= 1 && n <= player.mediaItemCount) player.seekTo(n - 1, C.TIME_UNSET)
+        val limit = if (live) chUris.size else if (::player.isInitialized) player.mediaItemCount else 0
+        if (n != null && n >= 1 && n <= limit) {
+            if (live) selectLiveChannel(n - 1, "number") else player.seekTo(n - 1, C.TIME_UNSET)
+        }
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -658,6 +667,9 @@ class HomePlayerActivity : Activity() {
         // Amlogic can freeze a running decoder when its output switches between SurfaceView
         // and TextureView. Stop it before replacing the output; playlist and AFR stay intact.
         if (restart) player.stop()
+        frameGate.onOutput(null, renderedCount())
+        frameWatchdogHits = 0
+        if (restart) { cover.visibility = View.VISIBLE; showSpinner(true) }
         curTexture = texture
         val old = playerView
         val nv = makePlayerView(texture)
@@ -819,7 +831,7 @@ class HomePlayerActivity : Activity() {
                     }
                     val sid = Uri.parse(chUris[position]).lastPathSegment ?: ""
                     val n = epgMap?.optJSONObject(sid)?.optJSONObject("n")
-                    val cur = position == player.currentMediaItemIndex
+                    val cur = if (live) position == liveIndex else position == player.currentMediaItemIndex
                     (row.getChildAt(1) as TextView).apply { text = (if (cur) "▶ " else "") + chNames[position]; setTextColor(if (cur) Color.parseColor("#F9A825") else Color.WHITE) }
                     (row.getChildAt(2) as TextView).text = if (n != null) "${fmtClock(n.optLong("s"))} ${n.optString("t")}" else ""
                     loadLogo(row.getChildAt(0) as android.widget.ImageView, logoMap[sid], chNames[position])
@@ -827,7 +839,10 @@ class HomePlayerActivity : Activity() {
                     return row
                 }
             }
-            setOnItemClickListener { _, _, pos, _ -> player.seekTo(pos, C.TIME_UNSET); hidePanel() }
+            setOnItemClickListener { _, _, pos, _ ->
+                if (live) selectLiveChannel(pos, "list") else player.seekTo(pos, C.TIME_UNSET)
+                hidePanel()
+            }
             // круговая прокрутка: с первого канала вверх — на последний, с последнего вниз — на первый
             setOnKeyListener { v, keyCode, ev ->
                 val lv = v as ListView
@@ -927,7 +942,10 @@ class HomePlayerActivity : Activity() {
     // ---------- плеер ----------
 
     private fun setupPlayer(data: Uri) {
-        firstFrameSeen = false
+        frameGate.onItem(null, null, 0L)
+        pendingLiveRetry?.let { ui.removeCallbacks(it); pendingLiveRetry = null }
+        liveEpoch++
+        liveRetry.reset()
         val headers = HashMap<String, String>()
         intent.getStringArrayExtra("headers")?.let { h ->
             var i = 0
@@ -1047,6 +1065,22 @@ class HomePlayerActivity : Activity() {
             override fun onAudioSinkError(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, audioSinkError: Exception) {
                 DLog.log("w", "audio_sink_error", audioSinkError.javaClass.simpleName, "drc=${drc.mode}")
             }
+            override fun onRenderedFirstFrame(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, surface: Any, renderTimeMs: Long) {
+                val key = itemKey()
+                val output = surfaceKey(surface)
+                ui.post {
+                    if (finished) return@post
+                    if (frameGate.onFrame(key, output)) {
+                        liveRetry.reset()
+                        frameWatchdogHits = 0
+                        ui.removeCallbacks(delayedSpinner)
+                        cover.visibility = View.GONE
+                        showSpinner(false)
+                        updateBufferIndicator(player.playbackState)
+                        DLog.log("i", "video_gate", key, "epoch=${frameGate.generation} output=$output frame=true")
+                    }
+                }
+            }
         })
         player.setVideoFrameMetadataListener { presentationTimeUs, _, format, _ ->
             if (frameRate.needsFrames && format.frameRate <= 0f) {
@@ -1071,6 +1105,7 @@ class HomePlayerActivity : Activity() {
         chNames = uris.mapIndexed { i, _ -> names.getOrNull(i) ?: "${i + 1}" }
         val title = intent.getStringExtra("title") ?: ""
         startIndex = uris.indexOfFirst { it == data }.coerceAtLeast(0)
+        liveIndex = startIndex
 
         val subs = intent.getParcelableArrayExtra("subs")?.filterIsInstance<Uri>() ?: emptyList()
         val subNames = intent.getStringArrayExtra("subs.name")
@@ -1096,7 +1131,12 @@ class HomePlayerActivity : Activity() {
             val qa = org.json.JSONArray(intent.getStringExtra("yt_quals") ?: "[]")
             ytQuals = (0 until qa.length()).map { qa.getJSONObject(it).let { o -> Triple(o.getInt("h"), o.optString("v"), o.getString("url")) } }
         } catch (_: Exception) {}
-        if (!live && !ytAudio.isNullOrBlank() && items.size == 1) {
+        liveItems = if (live) items else emptyList()
+        if (live) {
+            // Live: Exo holds exactly the selected channel. EOF/error never auto-advances
+            // to a neighbouring channel; the retry below re-opens this same URL.
+            player.setMediaItem(items[startIndex], 0L)
+        } else if (!ytAudio.isNullOrBlank() && items.size == 1) {
             // YouTube отдаёт видео и звук разными файлами: склеиваем на лету
             val pf = ProgressiveMediaSource.Factory(http)
             player.setMediaSource(
@@ -1105,6 +1145,9 @@ class HomePlayerActivity : Activity() {
             )
         } else
         player.setMediaItems(items, startIndex, intent.getIntExtra("position", 0).toLong().coerceAtLeast(0))
+        frameGate.onItem(itemKey(), null, renderedCount())
+        ui.removeCallbacks(frameWatchdog)
+        ui.postDelayed(frameWatchdog, 1000)
         // рекламные вставки (SponsorBlock): [[с, по], …] в секундах
         try {
             val arr = org.json.JSONArray(intent.getStringExtra("yt_skip") ?: "[]")
@@ -1136,32 +1179,26 @@ class HomePlayerActivity : Activity() {
                 statusView.text = if (state == Player.STATE_BUFFERING && !live) "Загрузка…" else ""
                 updateBufferIndicator(state)
                 if (state == Player.STATE_ENDED) {
-                    if (live) reconnect() else { completed = true; closePlayer() }
+                    if (live) scheduleLiveRetry("eof") else { completed = true; closePlayer() }
                 }
-                if (state == Player.STATE_READY) { liveRetries = 0; updateTitle() }
-            }
-
-            override fun onRenderedFirstFrame() {
-                firstFrameSeen = true
-                ui.removeCallbacks(delayedSpinner)
-                cover.visibility = View.GONE
-                updateBufferIndicator(player.playbackState)
+                if (state == Player.STATE_READY) updateTitle()
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                // автопереход на следующую серию: прошлая досмотрена
-                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                // автопереход на следующую серию: прошлая досмотрена (только VOD)
+                if (!live && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                     try { player.getMediaItemAt(tlCur).localConfiguration?.uri?.toString()?.let { tlAutoDone.add(it) } } catch (_: Exception) {}
                     if (tlMeta != null) tlSend(listOf(tlCur), true)
                 }
-                tlCur = player.currentMediaItemIndex
+                if (!live) tlCur = player.currentMediaItemIndex
                 qualityApplied = false; lastQualityClass = 0      // у каждой серии свой набор дорожек: качество по умолчанию выбираем заново
-                if (beginFrameRateItem()) firstFrameSeen = false
+                beginFrameRateItem()
+                frameGate.onItem(itemKey(), null, renderedCount())
                 if (!firstFrameSeen) showSpinner(true)
                 if (live && !firstFrameSeen) cover.visibility = View.VISIBLE
                 if (live) swapSurface(wantTexture(mediaItem?.localConfiguration?.uri?.lastPathSegment))
                 // ручной выбор источника действует только на этом канале: ушли с него — снова «авто»
-                if (forcedIdx >= 0 && player.currentMediaItemIndex != forcedIdx) {
+                if (!live && forcedIdx >= 0 && player.currentMediaItemIndex != forcedIdx) {
                     forcedOrig?.let { o -> try { player.replaceMediaItem(forcedIdx, o) } catch (_: Exception) {} }
                     forcedIdx = -1; forcedOrig = null; forcedSrc = -1
                 }
@@ -1207,9 +1244,9 @@ class HomePlayerActivity : Activity() {
                     player.prepare()
                     return
                 }
-                if (live && liveRetries < 30) {
-                    DLog.log("w", "live_retry", error.errorCodeName, "attempt=${liveRetries + 1} buffer=${player.totalBufferedDuration}")
-                    reconnect(); return
+                if (live) {
+                    scheduleLiveRetry("error:${error.errorCodeName}")
+                    return
                 }
                 if (error.errorCode in 2000..2999 && refreshYoutube()) return
                 val decoderIssue = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
@@ -1280,7 +1317,7 @@ class HomePlayerActivity : Activity() {
 
     private fun beginFrameRateItem(): Boolean {
         val speed = if (live) 1f else player.playbackParameters.speed
-        val changed = frameRate.beginItem("${player.currentMediaItemIndex}:$speed")
+        val changed = frameRate.beginItem("${logicalIndex()}:$speed")
         if (changed) ptsRate.reset()
         return changed
     }
@@ -1302,8 +1339,8 @@ class HomePlayerActivity : Activity() {
     }
 
     private fun updateTitle() {
-        val idx = player.currentMediaItemIndex
-        val t = names.getOrNull(idx)
+        val idx = logicalIndex()
+        val t = (if (live) chNames.getOrNull(idx) else names.getOrNull(idx))
             ?: player.currentMediaItem?.mediaMetadata?.title?.toString()
             ?: intent.getStringExtra("title") ?: ""
         titleView.text = t
@@ -1324,13 +1361,97 @@ class HomePlayerActivity : Activity() {
         updateEpgText()
     }
 
-    // эфир оборвался (канал перезапустился, сеть) — переподключаемся к тому же каналу
-    private fun reconnect() {
-        liveRetries++
+    private fun logicalIndex(): Int =
+        if (live) liveIndex else if (::player.isInitialized) player.currentMediaItemIndex else 0
+
+    private fun renderedCount(): Long {
+        if (!::player.isInitialized) return 0L
+        val c = player.videoDecoderCounters ?: return 0L
+        c.ensureUpdated()
+        return c.renderedOutputBufferCount.toLong()
+    }
+
+    private fun itemKey(): String {
+        if (live) return "live:${liveKey()}"
+        val index = if (::player.isInitialized) player.currentMediaItemIndex else 0
+        val id = player.currentMediaItem?.localConfiguration?.uri?.lastPathSegment ?: "?"
+        return "vod:$index:$id"
+    }
+
+    private fun surfaceKey(surface: Any?): String? =
+        surface?.let { "s${System.identityHashCode(it)}" }
+
+    private val frameWatchdog = object : Runnable {
+        override fun run() {
+            if (finished || !::player.isInitialized) return
+            if (live && player.playbackState == Player.STATE_READY && player.isPlaying && !frameGate.hasFrame()) {
+                val rendered = renderedCount()
+                if (rendered > frameGate.renderedBase()) {
+                    if (++frameWatchdogHits >= 2) {
+                        frameGate.markFrame()
+                        ui.removeCallbacks(delayedSpinner)
+                        cover.visibility = View.GONE
+                        showSpinner(false)
+                        DLog.log("w", "video_gate_recovered", itemKey(), "epoch=${frameGate.generation} base=${frameGate.renderedBase()} rendered=$rendered")
+                        frameWatchdogHits = 0
+                    }
+                } else frameWatchdogHits = 0
+            } else frameWatchdogHits = 0
+            ui.postDelayed(this, 1000)
+        }
+    }
+
+    private fun liveKey(index: Int = liveIndex): String =
+        chUris.getOrNull(index)?.let { Uri.parse(it).lastPathSegment } ?: "ch$index"
+
+    /**
+     * Live recovery is bound to the selected channel epoch. A retry from an
+     * older channel is dropped instead of touching the new channel.
+     */
+    private fun scheduleLiveRetry(reason: String) {
+        if (!live || finished || !::player.isInitialized) return
+        val epoch = liveEpoch
+        val index = liveIndex
+        pendingLiveRetry?.let { ui.removeCallbacks(it); pendingLiveRetry = null }
+        val delay = liveRetry.nextDelay()
+        if (delay == null) {
+            DLog.log("e", "live_retry_exhausted", liveKey(index), "attempt=${liveRetry.attempt} reason=$reason")
+            statusView.text = "Нет сигнала"
+            return
+        }
+        DLog.log("w", "live_retry", liveKey(index), "attempt=${liveRetry.attempt} delay=$delay reason=$reason buffer=${player.totalBufferedDuration}")
         statusView.text = "Переподключение…"
-        ui.postDelayed({
-            if (!finished) { player.seekToDefaultPosition(); player.prepare(); player.play() }
-        }, 1500)
+        val run = Runnable {
+            pendingLiveRetry = null
+            if (finished || epoch != liveEpoch || index != liveIndex || !::player.isInitialized) return@Runnable
+            try {
+                val item = liveItems.getOrNull(index)
+                if (item != null) player.setMediaItem(item, 0L) else player.seekToDefaultPosition()
+                player.prepare()
+                player.playWhenReady = true
+                DLog.log("i", "live_retry_start", liveKey(index), "epoch=$epoch attempt=${liveRetry.attempt}")
+            } catch (e: Exception) {
+                DLog.log("e", "live_retry_failed", liveKey(index), e.javaClass.simpleName)
+            }
+        }
+        pendingLiveRetry = run
+        ui.postDelayed(run, delay)
+    }
+
+    private fun selectLiveChannel(index: Int, source: String) {
+        if (!live || !::player.isInitialized || index !in chUris.indices) return
+        liveEpoch++
+        liveRetry.reset()
+        pendingLiveRetry?.let { ui.removeCallbacks(it); pendingLiveRetry = null }
+        liveIndex = index
+        forcedIdx = -1; forcedOrig = null; forcedSrc = -1
+        frameGate.onItem(itemKey(), null, renderedCount())
+        val item = liveItems.getOrNull(index) ?: MediaItem.fromUri(Uri.parse(chUris[index]))
+        DLog.log("i", "live_select", liveKey(index), "index=$index epoch=$liveEpoch source=$source")
+        player.setMediaItem(item, 0L)
+        player.prepare()
+        player.playWhenReady = true
+        updateTitle()
     }
 
     // логотип канала (пикон) из программы передач: загружаем в фоне и кэшируем
@@ -1456,10 +1577,10 @@ class HomePlayerActivity : Activity() {
 
     // следующий/предыдущий канал по кольцу
     private fun stepChannel(dir: Int) {
-        val n = player.mediaItemCount
+        val n = if (live) chUris.size else if (::player.isInitialized) player.mediaItemCount else 0
         if (n < 2) return
-        val to = ((player.currentMediaItemIndex + dir) % n + n) % n
-        player.seekTo(to, C.TIME_UNSET)
+        val to = ((logicalIndex() + dir) % n + n) % n
+        if (live) selectLiveChannel(to, "step") else player.seekTo(to, C.TIME_UNSET)
         if (panelOpen) chList?.let { l -> chSelectPaged(l, to) }
     }
 
@@ -1469,7 +1590,10 @@ class HomePlayerActivity : Activity() {
     private val channelOk by lazy {
         TvOkPress({ run, delay -> ui.postDelayed(run, delay) }, { ui.removeCallbacks(it) }, {
             val pos = chList?.selectedItemPosition ?: -1
-            if (panelOpen && pos in chUris.indices) { player.seekTo(pos, C.TIME_UNSET); hidePanel() }
+            if (panelOpen && pos in chUris.indices) {
+                if (live) selectLiveChannel(pos, "list_ok") else player.seekTo(pos, C.TIME_UNSET)
+                hidePanel()
+            }
         }, {
             val pos = chList?.selectedItemPosition ?: -1
             if (panelOpen && pos in chUris.indices) showSchedule(pos)
@@ -1568,11 +1692,11 @@ class HomePlayerActivity : Activity() {
         (chList?.adapter as? BaseAdapter)?.notifyDataSetChanged()
         val cl = chList
         if (cl != null) {
-            val cur = player.currentMediaItemIndex
+            val cur = logicalIndex()
             cl.setSelectionFromTop(cur, 0)                        // чтобы появились строки и можно было измерить высоту
             cl.post { chSelectPaged(cl, cur) }
         }
-        scheduleDetail(player.currentMediaItemIndex)
+        scheduleDetail(logicalIndex())
         chList?.requestFocus()
         armChannelTimeout()
     }
@@ -1992,7 +2116,7 @@ class HomePlayerActivity : Activity() {
 
     // источники канала из Channel Manager: «авто» (его логика) или конкретная дорожка
     private fun pickSource() {
-        val idx = player.currentMediaItemIndex
+        val idx = logicalIndex()
         val uri = player.currentMediaItem?.localConfiguration?.uri ?: return
         val sid = uri.lastPathSegment ?: return
         val base = "${uri.scheme}://${uri.authority}"
@@ -2020,14 +2144,24 @@ class HomePlayerActivity : Activity() {
                     if (labels.size <= 2) { Toast.makeText(this, "У этого канала один источник", Toast.LENGTH_SHORT).show(); return@post }
                     val cur = if (forcedIdx == idx && forcedSrc >= 0) forcedSrc + 1 else 0
                     show("Источник", labels, cur) { pick ->
-                        val orig = if (forcedIdx == idx && forcedOrig != null) forcedOrig!! else player.getMediaItemAt(idx)
+                        val orig: MediaItem = if (forcedIdx == idx && forcedOrig != null) forcedOrig!!
+                        else (if (live) liveItems.getOrNull(idx) ?: player.currentMediaItem else player.getMediaItemAt(idx)) ?: return@show
                         val item = if (pick == 0) orig
                         else orig.buildUpon().setUri(Uri.parse("$base/stream/$sid?src=${pick - 1}")).build()
                         forcedIdx = if (pick == 0) -1 else idx
                         forcedOrig = if (pick == 0) null else orig
                         forcedSrc = pick - 1
-                        player.replaceMediaItem(idx, item)
-                        player.prepare()
+                        if (live) {
+                            if (idx == liveIndex) {
+                                player.setMediaItem(item, 0L)
+                                player.prepare()
+                                player.play()
+                            }
+                        } else {
+                            player.replaceMediaItem(idx, item)
+                            player.prepare()
+                            player.play()
+                        }
                         player.play()
                         setOverlay(false)
                     }
@@ -2267,6 +2401,7 @@ class HomePlayerActivity : Activity() {
     private fun closePlayer() {
         if (finished) return
         finished = true
+        pendingLiveRetry?.let { ui.removeCallbacks(it); pendingLiveRetry = null }
         ytRefreshEpoch++
         ytRefreshConnection?.disconnect()
         updateBufferIndicator(Player.STATE_IDLE)
@@ -2327,6 +2462,7 @@ class HomePlayerActivity : Activity() {
 
     override fun onStop() {
         ytForeground = false
+        pendingLiveRetry?.let { ui.removeCallbacks(it); pendingLiveRetry = null }
         channelOk.cancel()
         liveOk.cancel()
         ui.removeCallbacks(closeChannels)
@@ -2348,7 +2484,7 @@ class HomePlayerActivity : Activity() {
         super.onStart()
         ytForeground = true
         if (live && !finished && ::player.isInitialized && stoppedAt > 0L) {
-            val idx = player.currentMediaItemIndex.coerceIn(0, (chUris.size - 1).coerceAtLeast(0))
+            val idx = liveIndex.coerceIn(0, (chUris.size - 1).coerceAtLeast(0))
             stoppedAt = 0L
             try {
                 player.release()

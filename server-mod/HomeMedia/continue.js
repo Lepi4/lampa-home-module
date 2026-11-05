@@ -378,6 +378,7 @@
   }
 
   function addButton(e, movie, media, rec, voice) {
+    if (rec && rec.no_ru_audio) return;                 // серия только с субтитрами: «Продолжить» не показываем
     var render = e.object.activity.render();
     if (render.find('.view--continue').length) return;
     var text = label(rec, voice);

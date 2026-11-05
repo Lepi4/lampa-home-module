@@ -23,6 +23,7 @@
     "CardQuality.cs",
     "CardPlus.cs",
     "Availability.cs",
+    "ReleasePolicy.cs",
     "Anime.cs",
     "AnimeGo.cs",
     "Panel.cs",

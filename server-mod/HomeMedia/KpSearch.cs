@@ -132,7 +132,7 @@ public class KpSearchController : BaseController
             }
         }
 
-        var results = new JArray(order.Select(k => merged[k]));
+        var results = new JArray(order.Where(k => !ReleasePolicy.Hide(merged[k])).Select(k => merged[k]));
         return Content(JsonConvert.SerializeObject(new { Results = results }), "application/json; charset=utf-8");
     }
 

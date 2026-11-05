@@ -52,7 +52,7 @@ public static class DeviceStore
 {
     static readonly Regex idRx = new("^[0-9A-Za-z_-]{3,40}$");
     // допустимые настройки устройства: ключ → (проверка значения)
-    public static readonly string[] Keys = { "maxh", "saver", "wall", "hidel", "auto", "engine", "buf", "font", "alpha", "afr", "kpprof", "viewer", "mc_yt", "mc_wr", "mc_ym", "mc_src", "ytprof", "mc_auto", "mc_info", "vodbuf", "mc_top", "mc_topnew", "mc_toprate" };
+    public static readonly string[] Keys = { "maxh", "saver", "wall", "hidel", "auto", "engine", "buf", "font", "alpha", "afr", "kpprof", "viewer", "mc_yt", "mc_wr", "mc_ym", "mc_src", "ytprof", "mc_auto", "mc_info", "vodbuf", "mc_top", "mc_topnew", "mc_toprate", "version" };
 
     public static bool ValidId(string id) => !string.IsNullOrEmpty(id) && idRx.IsMatch(id);
 
@@ -117,7 +117,7 @@ public static class DeviceStore
                 var cfg = JObject.Parse((string)r[3] ?? "{}");
                 string model = r[1] as string ?? "", label = (string)cfg["display_name"];
                 arr.Add(new JObject { ["id"] = (string)r[0], ["name"] = string.IsNullOrEmpty(label) ? model : label,
-                    ["model"] = model, ["custom_name"] = label ?? "", ["seen"] = Convert.ToInt64(r[2]), ["cfg"] = cfg });
+                    ["model"] = model, ["custom_name"] = label ?? "", ["seen"] = Convert.ToInt64(r[2]), ["version"] = (string)cfg["version"], ["cfg"] = cfg });
             }
             return arr;
         });

@@ -1309,6 +1309,7 @@
       var o = {};
       Object.keys(MAP).forEach(function (k) { try { var v = localStorage.getItem(MAP[k]); if (v !== null) o[k] = v; } catch (e) {} });
       try { var kpp = JSON.parse(localStorage.getItem(KP_PREF) || '{}'); if (kpp.profile) o.kpprof = String(kpp.profile); } catch (e) {}
+      try { if (window.AndroidJS && typeof AndroidJS.appVersion === 'function') o.version = AndroidJS.appVersion(); } catch (e) {}
       return o;
     }
     // Older APKs already expose a Storage facade but have no subscription API.

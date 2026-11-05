@@ -57,6 +57,13 @@ public static class CardQuality
         ("TS", 0, new Regex(@"\bTS(-?Rip)?\b|\bHDTS\b|\bHDTC\b|TS-?Rip|Telesync|\bTC\b|Telecine|CAM-?Rip|\bCAM\b|HDCAM|Screener|DVD-?Scr", RegexOptions.IgnoreCase)),
     };
 
+    // тип лучшего/первого совпавшего релиза: BDRIP/WEBDL/WEBRIP/HDRIP/DVD/TS; "" — не распознан
+    public static string TypeLabel(string title)
+    {
+        foreach (var (l, r, re) in types) if (re.IsMatch(title ?? "")) return l;
+        return "";
+    }
+
     // разрешение, названное явно: 3 — 4K, 2 — FHD, 1 — HD, 0 — SD, -1 — не названо
     static int ResTier(string t, int infoQ)
     {

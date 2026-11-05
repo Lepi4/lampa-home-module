@@ -230,9 +230,14 @@
   function renderDevices(box, list) {
     box.appendChild(el('p', { class: 'muted', style: 'margin:0 0 8px;font-size:13px', text: 'Кто смотрит и возрастной ценз задаются в блоке «Зрители». Здесь «Профиль Кинопаба» выбирает только качество картинки на этой приставке.' }));
     if (!list.length) box.appendChild(el('p', { class: 'muted', text: 'Устройства появятся здесь после первого запуска Lampa Home с новой версией плагина.' }));
+    api('/home/app-updates/latest').then(function (r) {
+      if (!document.body.contains(box) || !r.ok || !r.json || !r.json.version_code) return;
+      box.insertBefore(el('p', { class: 'muted', text: 'Актуальный APK на сервере: ' + r.json.version_name + ' / ' + r.json.version_code }), box.firstChild.nextSibling);
+    }).catch(function () {});
     list.forEach(function (d) {
       var head = el('div', { class: 'head' }, el('b', { text: d.name || d.id }), el('span', { class: 'muted', text: d.id }), badge('был ' + ago(d.seen), Date.now() - d.seen < 180000 ? 'ok' : ''));
       if (d.custom_name && d.model) head.appendChild(el('span', { class: 'muted', text: d.model }));
+      if (d.version) head.appendChild(el('span', { class: 'muted', text: 'сборка ' + d.version }));
       head.appendChild(el('button', { text: 'Переименовать', onclick: function () {
         var name = prompt('Имя устройства (до 80 символов). Пустое поле вернёт название модели:', d.custom_name || d.name || '');
         if (name === null) return;

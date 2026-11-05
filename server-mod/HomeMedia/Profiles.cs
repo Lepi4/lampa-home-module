@@ -96,7 +96,13 @@ CREATE TABLE IF NOT EXISTS content_refs(provider TEXT,ref_kind TEXT,scope TEXT N
 CREATE TABLE IF NOT EXISTS memberships(profile_id TEXT,content_id TEXT,collection TEXT,active INTEGER NOT NULL,origin TEXT,at INTEGER,event TEXT,revision INTEGER NOT NULL,PRIMARY KEY(profile_id,content_id,collection));
 CREATE TABLE IF NOT EXISTS profile_rules(profile_id TEXT,kind TEXT,subject TEXT,decision TEXT,at INTEGER,PRIMARY KEY(profile_id,kind,subject));
 CREATE TABLE IF NOT EXISTS progress_aliases(profile_id TEXT,hash TEXT,card TEXT,id TEXT,PRIMARY KEY(profile_id,hash,card));
-CREATE TABLE IF NOT EXISTS kp_mirror_state(account TEXT,destination TEXT,content_id TEXT,remote_id TEXT,desired INTEGER,observed INTEGER,revision INTEGER NOT NULL DEFAULT 1,confirmed_revision INTEGER NOT NULL DEFAULT 0,retry_at INTEGER,attempts INTEGER NOT NULL DEFAULT 0,managed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(account,destination,content_id));");
+CREATE TABLE IF NOT EXISTS kp_mirror_state(account TEXT,destination TEXT,content_id TEXT,remote_id TEXT,desired INTEGER,observed INTEGER,revision INTEGER NOT NULL DEFAULT 1,confirmed_revision INTEGER NOT NULL DEFAULT 0,retry_at INTEGER,attempts INTEGER NOT NULL DEFAULT 0,managed INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(account,destination,content_id));
+CREATE TABLE IF NOT EXISTS release_events(profile_id TEXT NOT NULL,media TEXT NOT NULL,tmdb INTEGER NOT NULL,type TEXT NOT NULL,tier INTEGER NOT NULL,event_at INTEGER NOT NULL,PRIMARY KEY(profile_id,media,tmdb));
+CREATE TABLE IF NOT EXISTS release_episodes(profile_id TEXT NOT NULL,media TEXT NOT NULL,tmdb INTEGER NOT NULL,season INTEGER NOT NULL,episode INTEGER NOT NULL,has_ru INTEGER NOT NULL DEFAULT 0,best_tier INTEGER NOT NULL DEFAULT -1,best_type TEXT NOT NULL DEFAULT '',seeders INTEGER NOT NULL DEFAULT 0,checked_at INTEGER NOT NULL,PRIMARY KEY(profile_id,media,tmdb,season,episode));");
+        // Existing installations may already have the older release_episodes table.
+        try{Exec(c,"ALTER TABLE release_episodes ADD COLUMN best_tier INTEGER NOT NULL DEFAULT -1");}catch{}
+        try{Exec(c,"ALTER TABLE release_episodes ADD COLUMN best_type TEXT NOT NULL DEFAULT ''");}catch{}
+        try{Exec(c,"ALTER TABLE release_episodes ADD COLUMN seeders INTEGER NOT NULL DEFAULT 0");}catch{}
         Exec(c,"INSERT OR IGNORE INTO user_profiles(id,name,is_admin) VALUES(@id,@name,1)",("@id",MainId),("@name","Основной"));
         Exec(c,"INSERT OR IGNORE INTO kv(k,v) VALUES('user_default_profile',@id)",("@id",MainId));
         Exec(c,"INSERT OR IGNORE INTO kv(k,v) VALUES('user_cloud_import_profile',@id)",("@id",MainId));

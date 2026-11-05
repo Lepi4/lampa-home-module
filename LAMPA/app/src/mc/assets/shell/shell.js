@@ -991,6 +991,9 @@
   function openSettings() {
     var box = $('setup'); box.innerHTML = '';
     box.appendChild(el('h1', null, 'Настройки'));
+    var appv = '';
+    try { appv = (window.MC && typeof MC.appVersion === 'function') ? MC.appVersion() : ((window.AndroidJS && typeof AndroidJS.appVersion === 'function') ? AndroidJS.appVersion() : ''); } catch (e) {}
+    if (appv) box.appendChild(el('div', 'srow', el('div', 'sl', 'Сборка'), el('div', 'sv', appv)));
     var scroll = el('div', 'slist'); box.appendChild(scroll);
     var items = [];
     function group(t) { scroll.appendChild(el('h3', null, t)); }
