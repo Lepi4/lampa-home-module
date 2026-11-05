@@ -81,6 +81,8 @@ class ShellHost(private val a: MainActivity) : McHostApi {
 
     override fun show() {
         MainActivity.mcShellHidden = false
+        MainActivity.mcRestoreLast = false
+        a.runVoidJsFunc("(function(){try{localStorage.removeItem('mc_last_activity')}catch(e){}})()", "")
         ui.post {
             val was = shown
             shown = true

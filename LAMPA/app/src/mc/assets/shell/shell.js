@@ -29,7 +29,7 @@
   function applyUserPolicy(next){
     var previous=userContext;if(!previous)return false;
     if(!next.ready||!next.profile||next.profile.id!==previous.profile.id||next.profile.policy_rev!==previous.profile.policy_rev){
-      userGeneration++;clearMetadataQueues();state.mem={};state.cfg=null;userContext=next.ready?next:null;try{MC.restartLampa();}catch(e){}startHome(true);return true;
+      userGeneration++;clearMetadataQueues();try{if(window.__homeClearEpisodeMarks)window.__homeClearEpisodeMarks();}catch(e){}state.mem={};state.cfg=null;userContext=next.ready?next:null;try{MC.restartLampa();}catch(e){}startHome(true);return true;
     }
     userContext=next;return false;
   }
@@ -37,7 +37,7 @@
     api('/home/profiles',function(d){menuShow('Профиль',d.profiles.map(function(p){return [p.name+(p.is_child?' · детский':''),null,function(){
       function change(pin){var result;try{result=JSON.parse(MC.profileSwitch(p.id,pin));}catch(e){toast('Не удалось сменить профиль');return;}
         if(!result.token){toast('Проверьте ПИН-код');return;}
-        userGeneration++;clearMetadataQueues();userContext=JSON.parse(MC.profileContext());state.mem={};state.cfg=null;state.lastLoad=0;state.nav=[];releasePosters($('rows'));$('rows').innerHTML='';menuClose();startHome(true);}
+        userGeneration++;clearMetadataQueues();try{if(window.__homeClearEpisodeMarks)window.__homeClearEpisodeMarks();}catch(e){}userContext=JSON.parse(MC.profileContext());state.mem={};state.cfg=null;state.lastLoad=0;state.nav=[];releasePosters($('rows'));$('rows').innerHTML='';menuClose();startHome(true);}
       if(p.has_pin&&!p.is_child)pinPad(p.name,change,switchUsers);else change('');
     }];}));});
   }
@@ -317,6 +317,11 @@
     rebuildNav(); setFocus(state.r, Math.max(0, idx - (idx > 0 ? 1 : 0)), true);
   }
 
+  function ytPackName() {
+    var s = userContext && userContext.profile && userContext.profile.settings;
+    return (s && s.youtube_profile) || (state.dev || {}).ytprof || 'main';
+  }
+
   function cardMenu(e, rowId) {
     var it = e._item, title = it.title || it.name || '';
     if(it.history_card){
@@ -328,10 +333,10 @@
     if (rowId === 'youtube') {
       var cid = it.channel_id, ent = [['Открыть видео', null, function () { menuClose(); e._act(); }]];
       if (cid) {
-        api('/yt/subs?profile=' + encodeURIComponent((state.dev || {}).ytprof || 'main'), function (d) {
+        api('/yt/subs?profile=' + encodeURIComponent(ytPackName()), function (d) {
           var on = (d.channels || []).some(function (c) { return c.id === cid; });
           ent.push([on ? 'Отписаться от канала' : 'Подписаться на канал', it.channel || '', function () {
-            var pf = encodeURIComponent((state.dev || {}).ytprof || 'main');
+            var pf = encodeURIComponent(ytPackName());
             api(on ? '/yt/subs/remove?profile=' + pf + '&ch=' + encodeURIComponent(cid) : '/yt/subs/add?profile=' + pf + '&channel=' + encodeURIComponent(cid), function () { toast(on ? 'Отписка' : 'Подписка: ' + (it.channel || '')); menuClose(); state.lastLoad = 0; });
           }]);
           ent.push(['Закрыть', null, menuClose]); menuShow(title, ent);
@@ -826,7 +831,7 @@
       nav();
     }
     if(!enabled){paint(false);return;}
-    var pack=cfg.youtube_profile||(state.dev||{}).ytprof||'main';
+    var pack=ytPackName();
     api('/yt/subs?profile='+encodeURIComponent(pack),function(d){paint((d.channels||[]).length>0);},function(){},10000);
   }
 
@@ -1037,7 +1042,7 @@
     }
     if (userContext && userContext.profile.is_child) {
       row('Ленты', 'Что показывать и в каком порядке', function () { return '›'; }, null, profileRowsSettings);
-      row('Профиль YouTube', 'Набор каналов этого профиля', ytLabel, null, cycleYoutubeProfile);
+      row('Профиль YouTube', 'Назначается во взрослом профиле', ytLabel, null, null);
       var ytOn = true, ytOrder = 50, ytRow = row('Ряд YouTube', 'Только на этом профиле', function () { return ytOn ? 'показывать' : 'скрыть'; }, function (dir, paint) {
         ytOn = !ytOn;
         writeApi('/home/profiles/me/rows', { rows: [{ id: 'youtube', enabled: ytOn, order: ytOrder }] }, function (r) {

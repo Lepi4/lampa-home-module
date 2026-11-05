@@ -46,7 +46,7 @@ public static class LastPlayStore
     {
         var rec = (JObject)n.Resume.DeepClone();
         rec["hash"] = n.H; rec["pos"] = n.T; rec["dur"] = n.D; rec["at"] = n.U;
-        rec["done"] = n.Op == "completed" || KpUnified.IsDone(n.T, n.D, n.P);
+        rec["done"] = n.Op == "completed" || (n.D > 0 && KpUnified.IsDone(n.T, n.D, n.P));
         if (rec["pl"] == null) rec["plKeep"] = true;                      // список серий торрента не пришёл — остаётся прежний
         string src = (string)rec["src"] ?? ""; if (src.Length == 0 || src.Length > 20) return;
         if (!System.Text.RegularExpressions.Regex.IsMatch(n.C ?? "", "^[0-9A-Za-z_.-]{1,60}$")) return;

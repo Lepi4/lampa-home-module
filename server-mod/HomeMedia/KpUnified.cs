@@ -42,7 +42,7 @@ public static class KpUnified
     // Недосмотренное по карточке: последняя по времени запись, если она не завершена (< 90%).
     // Единое правило: просмотрено — до конца осталось не больше 10 минут (и пройдена половина) или просмотр дошёл до конца
     public static bool IsDone(double pos, double dur, double pct)
-        => dur > 0 ? ((dur - pos <= Math.Min(600, dur * 0.12) && pos >= dur * 0.5) || pct >= 90 || pos / dur >= 0.90) : pct >= 90;
+        => dur > 0 && ((dur - pos <= Math.Min(600, dur * 0.12) && pos >= dur * 0.5) || pct >= 90 || pos / dur >= 0.90);
 
     public static async Task<JObject> Progress(string media, long tmdb)
     {

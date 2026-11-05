@@ -242,16 +242,25 @@ public class YandexMusicController : BaseController
 
     [HttpGet, HttpPost, AllowAnonymous]
     [Route("ym/auth/start")]
-    public async Task<ActionResult> AuthStart() => Json(await YmStore.AuthStart());
+    public async Task<ActionResult> AuthStart()
+    {
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
+        return Json(await YmStore.AuthStart());
+    }
 
     [HttpGet, AllowAnonymous]
     [Route("ym/auth/poll")]
-    public async Task<ActionResult> AuthPoll() => Json(await YmStore.AuthPoll());
+    public async Task<ActionResult> AuthPoll()
+    {
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
+        return Json(await YmStore.AuthPoll());
+    }
 
     [HttpGet, HttpPost, AllowAnonymous]
     [Route("ym/auth/reset")]
     public ActionResult AuthReset()
     {
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         var cfg = YmStore.Load();
         cfg.Remove("token"); cfg.Remove("uid"); cfg.Remove("login"); cfg.Remove("plus");
         YmStore.Save(cfg);
@@ -263,6 +272,7 @@ public class YandexMusicController : BaseController
     [Route("ym/auth/token")]
     public async Task<ActionResult> AuthToken(string token)
     {
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         if (string.IsNullOrWhiteSpace(token)) return Json(new { error = "empty" }, 400);
         var cfg = YmStore.Load(); cfg["token"] = token.Trim(); YmStore.Save(cfg);
         return Json(await YmStore.Refresh());
@@ -272,6 +282,7 @@ public class YandexMusicController : BaseController
     [Route("ym/quality")]
     public ActionResult SetQuality(string q)
     {
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         if (q != "lossless" && q != "hq" && q != "nq") return Json(new { error = "bad_quality" }, 400);
         var cfg = YmStore.Load(); cfg["quality"] = q; YmStore.Save(cfg);
         return Json(new { quality = q });

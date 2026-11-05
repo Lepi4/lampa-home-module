@@ -510,6 +510,15 @@ public class TvGuideController : BaseController
     static object Pr(TvStore.Prog p, bool full = false)
         => p == null ? null : full ? new { t = p.T, s = p.S, e = p.E, d = p.D } : (object)new { t = p.T, s = p.S, e = p.E };
 
+    bool DeviceWriteOk(string dev)
+    {
+        if (!Profiles.Enabled) return true;
+        var user = Profiles.FromRequest(HttpContext);
+        if (user?.Admin == true) return true;
+        if (string.IsNullOrEmpty(dev)) return false;
+        return string.Equals(dev, user?.Device, StringComparison.Ordinal);
+    }
+
     [HttpGet, AllowAnonymous]
     [Route("tv.js")]
     public ActionResult Plugin()
@@ -536,6 +545,7 @@ public class TvGuideController : BaseController
     [Route("tv/config/set")]
     public async Task<ActionResult> SetConfig(string url = null, bool? enable = null)
     {
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         var cfg = TvStore.Config();
         if (url != null)
         {
@@ -559,6 +569,7 @@ public class TvGuideController : BaseController
     public ActionResult LastChannel(string set = null, string dev = null)
     {
         if (!string.IsNullOrEmpty(dev) && !Regex.IsMatch(dev, "^[0-9A-Za-z_-]{3,40}$")) dev = null;
+        if (!DeviceWriteOk(dev)) return Json(new { error = "forbidden" }, 403);
         if (!string.IsNullOrEmpty(set) && Regex.IsMatch(set, "^[0-9A-Za-z]{4,32}$")) TvStore.SetLast(dev, set);
         return Json(new { id = TvStore.LastFor(dev) });
     }
@@ -669,7 +680,12 @@ public class TvGuideController : BaseController
     // напоминания устройства: [{id, s, t, n}]
     [HttpGet, AllowAnonymous]
     [Route("tv/remind")]
-    public ActionResult RemindList(string dev = null) => Json(new { list = RemindStore.List(RDev(dev)) });
+    public ActionResult RemindList(string dev = null)
+    {
+        dev = RDev(dev);
+        if (!DeviceWriteOk(dev)) return Json(new { error = "forbidden" }, 403);
+        return Json(new { list = RemindStore.List(dev) });
+    }
 
     // поставить/снять напоминание на передачу (id потока канала, s — начало, unix)
     [HttpGet, HttpPost, AllowAnonymous]
@@ -678,6 +694,7 @@ public class TvGuideController : BaseController
     {
         if (string.IsNullOrEmpty(id) || !Regex.IsMatch(id, "^[0-9A-Za-z]{4,32}$") || s <= 0) return Json(new { error = "bad" }, 400);
         dev = RDev(dev);
+        if (!DeviceWriteOk(dev)) return Json(new { error = "forbidden" }, 403);
         bool on = RemindStore.Toggle(dev, id, s, t, n);
         return Json(new { on, list = RemindStore.List(dev) });
     }
@@ -687,7 +704,9 @@ public class TvGuideController : BaseController
     [Route("tv/remind/done")]
     public ActionResult RemindDone(string dev = null, string id = null, long s = 0)
     {
-        if (!string.IsNullOrEmpty(id)) RemindStore.Done(RDev(dev), id, s);
+        dev = RDev(dev);
+        if (!DeviceWriteOk(dev)) return Json(new { error = "forbidden" }, 403);
+        if (!string.IsNullOrEmpty(id)) RemindStore.Done(dev, id, s);
         return Json(new { ok = true });
     }
 

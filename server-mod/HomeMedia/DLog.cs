@@ -182,7 +182,7 @@ public class DLogController : BaseController
     [Route("home/dlog/summary")]
     public ActionResult Summary(int days = 7, string format = null, string dev = null, int tail = 0)
     {
-        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         if (!string.IsNullOrEmpty(dev) && tail > 0) return Json(DLogStore.Tail(dev, tail));
         if (format == "json") return Json(DLogStore.Summary(days));
         return ContentTo(DLogStore.SummaryText(days), "text/plain; charset=utf-8");
@@ -193,7 +193,7 @@ public class DLogController : BaseController
     [Route("home/dlog/set")]
     public ActionResult SetCfg(int days = 0, long until = 0, string on = null)
     {
-        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         if (days > 0) HomeDb.Set("dlog_until", (HomeDb.Now() + days * 86400000L).ToString());
         if (until > 0) HomeDb.Set("dlog_until", until.ToString());
         if (on != null) HomeDb.Set("dlog_on", on == "0" ? "0" : "1");

@@ -65,14 +65,16 @@ public static class ProfileAvailability
     static async Task SuppressSubtitlesOnlyNew(JObject card,HashSet<(int,int)> available,HashSet<(int,int)> seen)
     {
         if(ReleasePolicy.AllowSubtitlesOnly)return;
-        if(((int?)card["kp_new"]??0)<=0)return;
-        var latest=available.Where(e=>seen==null||!seen.Contains(e))
-            .OrderByDescending(e=>e.Item1).ThenByDescending(e=>e.Item2).FirstOrDefault();
-        if(latest.Item1<=0||latest.Item2<=0)return;
+        var unseen=available.Where(e=>seen==null||!seen.Contains(e)).ToList();
+        if(unseen.Count==0){card["kp_new"]=0;return;}
         long id=(long?)card["id"]??0;
         string title=(string)(card["original_name"]??card["name"])??"";
-        bool? ru=ReleasePolicy.EpisodeRu("tv",id,latest.Item1,latest.Item2);
-        if(ru==null)_=ReleaseIndexer.Ensure("tv",id,title);
-        else if(ru==false)card["kp_new"]=0;
+        int eligible=0;
+        foreach(var ep in unseen){
+            bool? ru=ReleasePolicy.EpisodeRu("tv",id,ep.Item1,ep.Item2);
+            if(ru==null){_=ReleaseIndexer.Ensure("tv",id,title);eligible++;continue;}
+            if(ru!=false)eligible++;
+        }
+        card["kp_new"]=eligible;
     }
 }

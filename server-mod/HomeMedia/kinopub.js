@@ -482,7 +482,7 @@
   if (!window.__home_state) window.__home_state = function (tl) {
     var time = (tl && tl.time) || 0, dur = (tl && tl.duration) || 0;
     var p = (tl && tl.percent) || (dur ? time / dur * 100 : 0);
-    var done = dur > 0 ? ((dur - time <= Math.min(600, dur * 0.12) && time >= dur * 0.5) || p >= 90) : p >= 90;
+    var done = dur > 0 ? ((dur - time <= Math.min(600, dur * 0.12) && time >= dur * 0.5) || p >= 90) : false;
     if (done) return { s: 'watched', p: 100, at: (tl && tl.updated) || 0 };
     if (time >= 30 || p >= 2) return { s: 'started', p: Math.max(p, 3), at: (tl && tl.updated) || 0 };
     return { s: '', p: 0, at: (tl && tl.updated) || 0 };
@@ -600,7 +600,7 @@
   function postTl(rows) {
     var out = rows.map(function (r) {
       return { id: r.id, h: r.hash, c: r.card, t: r.position || 0, d: r.duration || 0, p: r.percent || 0, u: r.watched_at || Date.now(),
-               event: (r.manual ? 'manual:' : '') + TL_SESSION + ':' + (++tlSeq), session: TL_SESSION, op: r.op || (r.percent >= 90 ? 'completed' : 'progress') };
+               event: (r.manual ? 'manual:' : '') + TL_SESSION + ':' + (++tlSeq), session: TL_SESSION, op: r.op || (r.duration > 0 && r.percent >= 90 ? 'completed' : 'progress') };
     });
     try {
       if(window.HomeUser && window.AndroidJS && typeof AndroidJS.tlEnqueueOwned==='function'){if(AndroidJS.tlEnqueueOwned(JSON.stringify(out),JSON.stringify(HomeUser.owner)))return out;}
@@ -616,6 +616,12 @@
 
   // Share one confirmation poll when a whole season is marked at once.
   var markWaiters=[],markPollTimer=0;
+  function finishWaiter(w, ok) { if (typeof w.done === 'function') w.done(!!ok); }
+  function clearEpisodeMarkWaiters() {
+    if (markPollTimer) { clearTimeout(markPollTimer); markPollTimer = 0; }
+    markWaiters.forEach(function (w) { finishWaiter(w, false); });
+    markWaiters = [];
+  }
   function pollEpisodeMarks(){
     markPollTimer=0;
     if(!markWaiters.length)return;
@@ -625,13 +631,13 @@
       var byId={};rows.forEach(function(r){if(r.id)byId[r.id]=r;});
       var pending=[];var callbacks=[];
       markWaiters.forEach(function(w){
-        if(w.token&&(!window.HomeUser||HomeUser.owner.token!==w.token))return;
+        if(w.token&&(!window.HomeUser||HomeUser.owner.token!==w.token)){callbacks.push(function(){finishWaiter(w,false);});return;}
         var found=byId[w.sent.id];
         if(found&&found.u>=w.sent.u){
           var confirmed=found.op===w.sent.op;
           if(confirmed)try{var tl=Lampa.Timeline.view(w.sent.h);tl.time=found.t;tl.duration=found.d;tl.percent=found.p;tl.updated=found.u;tl.received=true;Lampa.Timeline.update(tl);}catch(e){}
-          callbacks.push(function(){w.done(confirmed);});
-        }else if(Date.now()>=w.deadline)callbacks.push(function(){w.done(false);});
+          callbacks.push(function(){finishWaiter(w,confirmed);});
+        }else if(Date.now()>=w.deadline)callbacks.push(function(){finishWaiter(w,false);});
         else pending.push(w);
       });
       markWaiters=pending;
@@ -641,9 +647,12 @@
   }
   window.HomeEpisodeMark=function(row,done){
     row.manual=true;
-    markWaiters.push({sent:postTl([row])[0],deadline:Date.now()+14000,token:window.HomeUser&&HomeUser.owner.token,done:done});
+    var sent=postTl([row]);
+    if(!sent||!sent.length){finishWaiter({done:done},false);return;}
+    markWaiters.push({sent:sent[0],deadline:Date.now()+14000,token:window.HomeUser&&HomeUser.owner.token,done:done});
     if(!markPollTimer)markPollTimer=setTimeout(pollEpisodeMarks,150);
   };
+  window.__homeClearEpisodeMarks=clearEpisodeMarkWaiters;
 
   function nativeOwnsProgress() { return !!(window.AndroidJS && AndroidJS.tlEnqueue); }
   function startPositionPush(item, season, playlist) {

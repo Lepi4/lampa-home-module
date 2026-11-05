@@ -77,6 +77,14 @@ public class TlV2TestController : BaseController
                 T("A→B→repeat A: B wins, repeat is stale", sa == "accepted" && sb == "accepted" && sa2 == "stale" && State(c, "10").StartsWith("500/"), $"{sa},{sb},{sa2} {State(c, "10")}");
             }
 
+            // 2b. в одной session seq раньше wall-clock u
+            {
+                long uLate = HomeDb.Now() + 90_000;
+                long uEarly = HomeDb.Now();
+                int cmp = TlV2.CmpPair(uLate, "100:1", uEarly, "100:2");
+                T("CmpPair: same session prefers event seq over wall-clock u", cmp < 0, $"cmp={cmp}");
+            }
+
             // 3. любой порядок доставки приводит к одному итогу
             {
                 var evs = new List<JObject> { Ev("20", 1000, "1:1", t: 10), Ev("20", 1000, "2:1", t: 20), Ev("20", 1500, "1:2", t: 30), Ev("20", 1500, "1:3", t: 40, op: "completed", p: 100), Ev("20", 900, "", t: 5) };

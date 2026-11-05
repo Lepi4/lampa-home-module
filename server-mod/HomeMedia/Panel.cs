@@ -46,6 +46,9 @@ public static class Guard
         }
         catch { return false; }
     }
+
+    public static bool AdminWrite(HttpRequest r, HttpContext ctx)
+        => Ok(r) && (!Profiles.Enabled || Profiles.FromRequest(ctx)?.Admin == true);
 }
 
 public static class DeviceStore
@@ -69,6 +72,15 @@ public static class DeviceStore
                 {
                     foreach (var p in JObject.Parse(init).Properties())
                         if (Keys.Contains(p.Name) && p.Value.Type != JTokenType.Null) cfg[p.Name] = p.Value.ToString();
+                }
+                catch { }
+            }
+            else if (q.Count > 0 && !string.IsNullOrEmpty(init))
+            {
+                try
+                {
+                    var initObj = JObject.Parse(init);
+                    if (initObj["version"] != null) cfg["version"] = initObj["version"].ToString();
                 }
                 catch { }
             }
@@ -429,7 +441,7 @@ public class PanelController : BaseController
     {
         if (url != null)
         {
-            if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+            if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
             url = url.Trim().TrimEnd('/');
             if (url.Length > 0 && !Regex.IsMatch(url, @"^https?://[\w.\-]+(:\d{1,5})?(/[\w./\-]*)?$")) return Json(new { error = "bad_url" }, 400);
             HomeDb.Set("torrserver_url", url);
@@ -591,7 +603,7 @@ public class PanelController : BaseController
     [Route("home/wallpaper/upload")]
     public async Task<ActionResult> WallUpload(string name = null)
     {
-        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         if (!SafeName(name)) return Json(new { error = "bad_name" }, 400);
         Directory.CreateDirectory(wallDir);
         using var ms = new MemoryStream();
@@ -611,7 +623,7 @@ public class PanelController : BaseController
     [Route("home/wallpaper/delete")]
     public ActionResult WallDelete(string name = null)
     {
-        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         if (!SafeName(name)) return Json(new { error = "bad_name" }, 400);
         try { System.IO.File.Delete(Path.Combine(wallDir, name)); } catch { }
         return Json(new { ok = true });
@@ -622,7 +634,7 @@ public class PanelController : BaseController
     [Route("anime/cache/clear")]
     public ActionResult AnimeClear()
     {
-        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         HomeDb.With(c => HomeDb.Exec(c, "DELETE FROM anime_map"));
         return Json(new { ok = true });
     }

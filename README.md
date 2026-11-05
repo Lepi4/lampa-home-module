@@ -64,7 +64,7 @@ APK и сервер работают вместе: приложение пока
 python3 deploy/deploy-module.py \
   --url http://192.168.1.80:9118 \
   --profile-id u_default \
-  --package release/2026.11.05.3/homemedia.tar.gz
+  --package release/2026.11.06.1/homemedia.tar.gz
 ```
 
 Скрипт получает короткий администраторский сеанс, загружает пакет, ждёт проверку совместимости, запускает штатную замену и ждёт результат. Worker создаёт резервную копию перед заменой; откат выполняется кнопкой `rollback` в панели. Для подготовки без применения используйте `--no-apply`.
@@ -73,10 +73,10 @@ python3 deploy/deploy-module.py \
 
 ## Android
 
-Готовая сборка: `release/2026.11.05.3/LMPC-1.16.26-1144.apk`.
+Готовая сборка: `release/2026.11.06.1/LMPC-1.16.28-1146.apk`.
 
 ```bash
-adb install -r release/2026.11.05.3/LMPC-1.16.26-1144.apk
+adb install -r release/2026.11.06.1/LMPC-1.16.28-1146.apk
 ```
 
 **[Исходный код APK находится в LAMPA/](LAMPA/)**: код приложения, ресурсы и файлы Gradle опубликованы вместе с медиасерверным модулем. [Происхождение кода, состав исходников и сборка](ANDROID-SOURCE.md).
@@ -85,7 +85,7 @@ adb install -r release/2026.11.05.3/LMPC-1.16.26-1144.apk
 
 ```bash
 cd LAMPA
-./gradlew assembleMcRelease -PappVersionCode=1144 -PappVersionName=1.16.26
+./gradlew assembleMcRelease -PappVersionCode=1146 -PappVersionName=1.16.28
 ```
 
 Подпись и keystore намеренно не входят в публичный пакет. Не публикуйте `.env`, токены, cookies, базы данных или резервные копии.
@@ -96,11 +96,11 @@ cd LAMPA
 
 ## Релиз
 
-- HomeMedia: `2026.11.05.3`
-- APK: `1.16.26-mc`, versionCode `1144`
-- SHA-256 APK: `b382e32880fd8ed62ab27d3cb2e353984a57bce3e2d00a596a6768a8ce616975`
+- HomeMedia: `2026.11.06.1`
+- APK: `1.16.28-mc`, versionCode `1146`
+- SHA-256 APK: `8fc6bc85ac19403b72f4b2a8bf396064583d72604fe82907b18e6a13fae9e55d`
 
-Пакет последнего релиза: `release/2026.11.05.3/homemedia.tar.gz`.
+Пакет последнего релиза: `release/2026.11.06.1/homemedia.tar.gz`.
 
 Прокси редактируются прямо в разделах YouTube, Кинопаба и состояния сервера в `/home`: поле адреса, «Без прокси», «Проверить», «Сохранить». [Инструкция](docs/PROXY.md).
 Ссылки Channel Manager, TorrServer и Tvheadend открываются относительно панели через контейнер.

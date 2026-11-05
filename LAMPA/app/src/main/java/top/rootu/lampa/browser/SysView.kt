@@ -322,7 +322,14 @@ class SysView(override val mainActivity: MainActivity, override val viewResId: I
                 error: SslError?
             ) {
                 debugLog("Ignore SSL error: $error")
-                handler?.proceed() // Ignore SSL certificate errors
+                handler?.cancel()
+                view?.loadDataWithBaseURL(
+                    null,
+                    "<html><body style='background:#111;color:#eee;font-family:sans-serif;padding:2em'><h2>Ошибка сертификата</h2><p>${error?.primaryError ?: "SSL"}</p></body></html>",
+                    "text/html",
+                    "UTF-8",
+                    null
+                )
             }
         }
 

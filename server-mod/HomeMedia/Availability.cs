@@ -36,6 +36,13 @@ public static class Availability
     static long Now => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     static bool Fresh(AEntry e) => Now - e.at < (e.ok ? 12 * 3600 : 3 * 3600);
 
+    static string CacheKey(string media, long id, string profileId)
+    {
+        var p = Profiles.Get(profileId);
+        long rev = (long?)p?["policy_rev"] ?? 0;
+        return media + ":" + id + ":" + profileId + ":" + rev;
+    }
+
     static ConcurrentDictionary<string, AEntry> Load()
     {
         try
@@ -87,8 +94,8 @@ public static class Availability
         if (Now - probeAt < 300) return probeOk;
         try
         {
-            var j = JObject.Parse(await http.GetStringAsync("http://127.0.0.1:9118/jr/api/v2.0/indexers/all/results?apikey=&Query=" + Uri.EscapeDataString("Матрица")));
-            probeOk = j["Results"] is JArray a && a.Count > 0;
+            var arr = await JacredSearch.Aggregate("Query=" + Uri.EscapeDataString("Матрица"), applyHideFilter: false);
+            probeOk = arr.Count > 0;
         }
         catch { probeOk = false; }
         probeAt = Now;
@@ -105,43 +112,51 @@ public static class Availability
     }
 
     // живая раздача с русской озвучкой: сиды > 0 и (язык rus, озвучка в данных или в названии)
-    static async Task<bool> TorrentRu(JObject c)
+    static async Task<bool> TorrentRu(JObject c, string profileId)
     {
         string ru = (string)c["title"] ?? (string)c["name"] ?? "";
         string orig = (string)c["original_title"] ?? (string)c["original_name"] ?? "";
-        // оригинал на иероглифах в поиск не берём
         var queries = new[] { ru, orig }.Where(q => !string.IsNullOrWhiteSpace(q) && !reCjk.IsMatch(q)).Distinct().ToList();
+        bool ruOrig = (string)c["original_language"] == "ru";
+        JObject best = null;
+        int bestRank = int.MinValue, bestTier = int.MinValue, bestSd = int.MinValue;
 
         foreach (var q in queries)
         {
-            string url = "http://127.0.0.1:9118/jr/api/v2.0/indexers/all/results?apikey=&Query=" + Uri.EscapeDataString(q);
-            var j = JObject.Parse(await http.GetStringAsync(url));
-            if (j["Results"] is not JArray results) continue;
+            JArray results;
+            try { results = await JacredSearch.Aggregate("Query=" + Uri.EscapeDataString(q), applyHideFilter: true, profileId: profileId); }
+            catch { continue; }
             foreach (var r in results.Children<JObject>())
             {
                 if (!int.TryParse((string)r["Seeders"] ?? "0", out int seeders) || seeders <= 0) continue;
                 string title = (string)r["Title"] ?? "";
                 if (!TitleMatch(q, title)) continue;
-                if (ReleasePolicy.Hide(r)) continue;              // только субтитры, настройка выключена
-                if (ReleasePolicy.BlockedQuality(r)) continue;    // тип качества в чёрном списке лент
-                bool ruOrig = (string)c["original_language"] == "ru";   // российское: озвучка родная, достаточно живой раздачи
+                if (ReleasePolicy.Hide(r, profileId)) continue;
+                if (ReleasePolicy.BlockedQuality(r, profileId)) continue;
                 bool rus = ruOrig || (r["languages"] is JArray l && l.Any(x => (string)x == "rus"));
                 bool voices = r["info"]?["voices"] is JArray v && v.Count > 0;
-                if (rus || voices || reVoice.IsMatch(title))
+                if (!(rus || voices || reVoice.IsMatch(title))) continue;
+                int typeRank = ReleasePolicy.TypeRankScore(CardQuality.TypeLabel(title));
+                int tier = CardQuality.Tier(title);
+                if (best == null || ReleasePolicy.BetterRelease(typeRank, tier, seeders, bestRank, bestTier, bestSd))
                 {
-                    string media = (string)c["media_type"] ?? ((c["name"] != null || c["original_name"] != null) ? "tv" : "movie");
-                    ReleasePolicy.Track(media, (long?)c["id"] ?? 0, title);
-                    return true;
+                    best = r;
+                    bestRank = typeRank;
+                    bestTier = tier;
+                    bestSd = seeders;
                 }
             }
         }
-        return false;
+        if (best == null) return false;
+        string media = (string)c["media_type"] ?? ((c["name"] != null || c["original_name"] != null) ? "tv" : "movie");
+        ReleasePolicy.Track(media, (long?)c["id"] ?? 0, (string)best["Title"] ?? "", profileId);
+        return true;
     }
 
-    static async Task<bool> Check(JObject c, string media, string tok, string prof)
+    static async Task<bool> Check(JObject c, string media, string tok, string prof, string profileId)
     {
         long id = (long?)c["id"] ?? 0;
-        string key = media + ":" + id;
+        string key = CacheKey(media, id, profileId);
         if (cache.TryGetValue(key, out var hit) && Fresh(hit)) return hit.ok;
 
         await gate.WaitAsync();
@@ -168,7 +183,7 @@ public static class Availability
             if (!ok)
             {
                 if (!await JacredAlive()) unknown = true;
-                else { try { ok = await TorrentRu(c); } catch { unknown = true; } }
+                else { try { ok = await TorrentRu(c, profileId); } catch { unknown = true; } }
             }
 
             // 3) нигде не нашли — спрашиваем kino.pub (дорого, поэтому в пределах лимита; результат запоминается в карте)
@@ -196,6 +211,7 @@ public static class Availability
     // Убирает из списка карточки без русского названия и без русской озвучки. budgetMs — сколько ждём проверку.
     public static async Task Filter(JArray cards, string media, string tok, string prof, int budgetMs = 2200)
     {
+        string profileId = Profiles.CurrentId;
         try
         {
             foreach (var c in cards.Children<JObject>().Where(x => !HasRu(x)).ToList()) c.Remove();
@@ -204,7 +220,7 @@ public static class Availability
             var resolved = new ConcurrentDictionary<long, bool>();
             var tasks = list.Select(async c =>
             {
-                try { resolved[(long)c["id"]] = await Check(c, media, tok, prof); } catch { }
+                try { resolved[(long)c["id"]] = await Check(c, media, tok, prof, profileId); } catch { }
             }).ToList();
 
             await Task.WhenAny(Task.WhenAll(tasks), Task.Delay(budgetMs));

@@ -170,6 +170,13 @@ public static class PlexClient
     public static (string rk, string title, string section)? Lookup(string kind, long tmdb)
         => index.TryGetValue($"{kind}:{tmdb}", out var i) ? (i.Rk, i.Title, i.Section) : null;
 
+    public static long TmdbForShowRk(string rk)
+    {
+        foreach (var i in index.Values)
+            if (i.Kind == "tv" && i.Rk == rk) return i.Tmdb;
+        return 0;
+    }
+
     public static int IndexSize => index.Count;
 
     // Все элементы индекса (для списков «недавно добавлено» и по разделам)
@@ -215,6 +222,7 @@ public class LocalLibraryController : BaseController
     [Route("local/config")]
     public async Task<ActionResult> SetConfig()
     {
+        if (!Guard.AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         string body;
         using (var sr = new StreamReader(Request.Body, Encoding.UTF8)) body = await sr.ReadToEndAsync();
         JObject req;
@@ -292,6 +300,8 @@ public class LocalLibraryController : BaseController
     public async Task<ActionResult> Lookup(string type, long tmdb)
     {
         if (type != "movie" && type != "tv") return Json(new { error = "bad_type" }, 400);
+        if (Profiles.Enabled && !await ProfilePolicy.Allows(new JObject { ["id"] = tmdb, ["media_type"] = type }))
+            return Json(new { error = "content_forbidden" }, 403);
         if (!PlexClient.Ready()) return Json(new { found = false });
 
         try
@@ -346,6 +356,16 @@ public class LocalLibraryController : BaseController
     public async Task<ActionResult> Episodes(string rk,long tmdb=0)
     {
         if (!PlexClient.Ready() || string.IsNullOrEmpty(rk) || !rk.All(char.IsDigit)) return Json(new { error = "bad_request" }, 400);
+        long cardTmdb = tmdb;
+        if (cardTmdb <= 0) cardTmdb = PlexClient.TmdbForShowRk(rk);
+        if (cardTmdb > 0)
+        {
+            var show = PlexClient.Lookup("tv", cardTmdb);
+            if (show == null || show.Value.rk != rk) return Json(new { error = "bad_request" }, 403);
+            if (Profiles.Enabled && !await ProfilePolicy.Allows(new JObject { ["id"] = cardTmdb, ["media_type"] = "tv" }))
+                return Json(new { error = "content_forbidden" }, 403);
+        }
+        else if (Profiles.Enabled) return Json(new { error = "content_forbidden" }, 403);
         try
         {
             var d = await PlexClient.Json($"/library/metadata/{rk}/allLeaves");

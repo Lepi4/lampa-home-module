@@ -32,8 +32,8 @@ Channel Manager — в [Lepi4/lmpc-channel-manager](https://gitverse.ru/Lepi4/lm
 
 ```bash
 python publish-gitverse-release.py --repo /path/to/lampa-home-module \
-  --component homemedia --version 2026.11.05.3 \
-  --package /path/to/homemedia.tar.gz --apk /path/to/LMPC-1.16.26-1144.apk \
+  --component homemedia --version 2026.11.06.1 \
+  --package /path/to/homemedia.tar.gz --apk /path/to/LMPC-1.16.28-1146.apk \
   --sdk /path/to/Android/Sdk --push
 ```
 

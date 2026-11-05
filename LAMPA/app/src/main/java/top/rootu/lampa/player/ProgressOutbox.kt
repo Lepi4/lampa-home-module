@@ -60,7 +60,11 @@ object ProgressOutbox {
         }
         return a.compareTo(b)
     }
-    private fun cmpPair(u1: Long, e1: String, u2: Long, e2: String) = if (u1 != u2) u1.compareTo(u2) else cmpEvent(e1, e2)
+    private fun cmpPair(u1: Long, e1: String, u2: Long, e2: String): Int {
+        val p1 = parts(e1); val p2 = parts(e2)
+        if (p1 != null && p2 != null && p1.first == p2.first) return cmpEvent(e1, e2)
+        return if (u1 != u2) u1.compareTo(u2) else cmpEvent(e1, e2)
+    }
     private fun evOf(r: JSONObject) = r.optString("event")
 
     // ---------- файл ----------

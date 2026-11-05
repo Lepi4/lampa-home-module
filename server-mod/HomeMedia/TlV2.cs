@@ -122,7 +122,12 @@ public static class TlV2
         return i > 0 && long.TryParse(e.Substring(0, i), out s) && long.TryParse(e.Substring(i + 1), out q);
     }
 
-    public static int CmpPair(long u1, string e1, long u2, string e2) => u1 != u2 ? u1.CompareTo(u2) : CmpEvent(e1, e2);
+    public static int CmpPair(long u1, string e1, long u2, string e2)
+    {
+        if (TryParts(e1, out long s1, out _) && TryParts(e2, out long s2, out _) && s1 == s2)
+            return CmpEvent(e1, e2);
+        return u1 != u2 ? u1.CompareTo(u2) : CmpEvent(e1, e2);
+    }
 
     // ---------- проверка и применение события ----------
     public class Result
@@ -202,6 +207,8 @@ public static class TlV2
         };
         if (op == "reset") { r.T = 0; r.P = 0; }
         else if (op == "completed") r.P = 100;
+        else if (dur <= 0 && r.P > 0) r.P = 0;   // без длительности percent не хранится: duration=0 + percent=100 не должно считаться досмотром
+        else if (r.D <= 0) r.P = 0;
         // resume — необязательное поле: лишнее/слишком большое не делает событие недействительным, просто не используется
         if (x["resume"] != null && x["resume"].Type != JTokenType.Null && op != "reset")
         {

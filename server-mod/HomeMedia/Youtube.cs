@@ -267,23 +267,26 @@ public static class YtStore
     }
 
     // Набор каналов принадлежит профилю Lampa (Основной, Дети, жена), а не приставке.
-    public static string ResolvePack(string requested)
+    public static string ResolvePack(string requested, bool allowAdminOverride = false)
     {
         if (!HomeMedia.Profiles.Enabled || HomeMedia.Profiles.Current == null) return string.IsNullOrEmpty(requested) ? "main" : requested;
-        // Взрослая веб-панель перечисляет несколько глобальных наборов и
-        // запрашивает каждый отдельно. Раньше параметр requested игнорировался,
-        // поэтому счётчик «Дети» был 9, а отрисованные карточки приходили из «Я».
-        // Детский сеанс не может открыть чужой набор.
         var current = HomeMedia.Profiles.Get(HomeMedia.Profiles.CurrentId);
+        bool child = (bool?)current?["is_child"] == true;
         string own = UserProfile();
-        if (!string.IsNullOrEmpty(requested) && CanAssign(HomeMedia.Profiles.CurrentId, requested))
+        string chosen = (string)current?["settings"]?["youtube_profile"];
+        if (allowAdminOverride && HomeMedia.Profiles.Current.Admin && !string.IsNullOrEmpty(requested) && CanAssign(HomeMedia.Profiles.CurrentId, requested))
+            return requested;
+        if (child)
         {
-            bool child = (bool?)current?["is_child"] == true;
-            string selected = (string)current?["settings"]?["youtube_profile"];
-            if (!child || requested == selected || requested == own) return requested;
+            if (!string.IsNullOrEmpty(requested) && CanAssign(HomeMedia.Profiles.CurrentId, requested))
+            {
+                if (requested == chosen || requested == own) return requested;
+            }
+            if (CanAssign(HomeMedia.Profiles.CurrentId, chosen)) return chosen;
+            return own;
         }
-        string chosen = (string)HomeMedia.Profiles.Get(HomeMedia.Profiles.CurrentId)?["settings"]?["youtube_profile"];
-        if (CanAssign(HomeMedia.Profiles.CurrentId, chosen)) return chosen;
+        if (!string.IsNullOrEmpty(chosen) && CanAssign(HomeMedia.Profiles.CurrentId, chosen)) return chosen;
+        if (!string.IsNullOrEmpty(requested) && CanAssign(HomeMedia.Profiles.CurrentId, requested)) return requested;
         return own;
     }
 
@@ -755,6 +758,12 @@ public class YoutubeController : BaseController
         ContentType = "application/json; charset=utf-8",
         StatusCode = code
     };
+    string ResolveYtPack(string profile)
+    {
+        if (!HomeMedia.Profiles.Enabled) return profile;
+        bool adminList = HomeMedia.Profiles.FromRequest(HttpContext)?.Admin == true;
+        return YtStore.ResolvePack(profile, adminList);
+    }
 
     [HttpGet, AllowAnonymous]
     [Route("youtube.js")]
@@ -901,7 +910,7 @@ public class YoutubeController : BaseController
     [Route("yt/subs")]
     public ActionResult Subs(string profile = "main")
     {
-        if(HomeMedia.Profiles.Enabled)profile=YtStore.ResolvePack(profile);
+        if(HomeMedia.Profiles.Enabled)profile=ResolveYtPack(profile);
         else if (!YtStore.profRx.IsMatch(profile ?? "")) return Json(new { error = "bad_profile" }, 400);
         YtStore.FillAvatars(profile);
         return Json(new { channels = YtStore.Subs(profile) });
@@ -912,7 +921,7 @@ public class YoutubeController : BaseController
     [Route("yt/subs/add")]
     public async Task<ActionResult> Add(string profile = "main", string channel = null)
     {
-        if(HomeMedia.Profiles.Enabled)profile=YtStore.ResolvePack(profile);
+        if(HomeMedia.Profiles.Enabled)profile=ResolveYtPack(profile);
         else if (!YtStore.profRx.IsMatch(profile ?? "")) return Json(new { error = "bad_profile" }, 400);
         var (id, title) = await YtStore.ResolveChannel(channel);
         if (id == null) return Json(new { error = "not_found" }, 404);
@@ -925,7 +934,7 @@ public class YoutubeController : BaseController
     [Route("yt/subs/addmany")]
     public async Task<ActionResult> AddMany(string profile = "main")
     {
-        if(HomeMedia.Profiles.Enabled)profile=YtStore.ResolvePack(profile);
+        if(HomeMedia.Profiles.Enabled)profile=ResolveYtPack(profile);
         else if (!YtStore.profRx.IsMatch(profile ?? "")) return Json(new { error = "bad_profile" }, 400);
         string body;
         using (var rd = new StreamReader(Request.Body, Encoding.UTF8)) body = await rd.ReadToEndAsync();
@@ -944,7 +953,7 @@ public class YoutubeController : BaseController
     [Route("yt/subs/remove")]
     public ActionResult Remove(string profile = "main", string ch = null)
     {
-        if(HomeMedia.Profiles.Enabled)profile=YtStore.ResolvePack(profile);
+        if(HomeMedia.Profiles.Enabled)profile=ResolveYtPack(profile);
         else if (!YtStore.profRx.IsMatch(profile ?? "") || string.IsNullOrEmpty(ch)) return Json(new { error = "bad_args" }, 400);
         if (string.IsNullOrEmpty(ch)) return Json(new { error = "bad_args" }, 400);
         YtStore.RemoveSub(profile, ch);
@@ -982,7 +991,7 @@ public class YoutubeController : BaseController
     [Route("yt/feed")]
     public async Task<ActionResult> Feed(string profile = "main", int n = 24, int page = 1,string session=null)
     {
-        if(HomeMedia.Profiles.Enabled)profile=YtStore.ResolvePack(profile);
+        if(HomeMedia.Profiles.Enabled)profile=ResolveYtPack(profile);
         else if (!YtStore.profRx.IsMatch(profile ?? "")) return Json(new { error = "bad_profile" }, 400);
         if(session?.Length>80)return Json(new{error="bad_session"},400);
         var (results, more) = await YtStore.FeedPage(profile, page < 1 ? 1 : page, Math.Clamp(n, 1, 40),session);
@@ -993,7 +1002,7 @@ public class YoutubeController : BaseController
     [Route("yt/subs/import")]
     public async Task<ActionResult> Import(string profile = "main")
     {
-        if(HomeMedia.Profiles.Enabled)profile=YtStore.ResolvePack(profile);
+        if(HomeMedia.Profiles.Enabled)profile=ResolveYtPack(profile);
         else if (!YtStore.profRx.IsMatch(profile ?? "")) return Json(new { error = "bad_profile" }, 400);
         try
         {

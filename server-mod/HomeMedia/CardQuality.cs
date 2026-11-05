@@ -5,7 +5,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,7 +20,6 @@ public static class CardQuality
     static readonly string path = Path.Combine(Directory.GetCurrentDirectory(), "database", "quality_cache.json");
     static readonly ConcurrentDictionary<string, QEntry> cache = LoadCache();
     static readonly SemaphoreSlim gate = new(4, 4);
-    static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
     static readonly object saveLock = new();
 
     class QEntry { public string q = ""; public long at; }
@@ -127,10 +125,8 @@ public static class CardQuality
 
     static async Task<string> Fetch(string title, string year, bool tv)
     {
-        string url = "http://127.0.0.1:9118/jr/api/v2.0/indexers/all/results?apikey=&Query=" + Uri.EscapeDataString(title) + (tv ? "" : "&year=" + year);
-        var j = JObject.Parse(await http.GetStringAsync(url));
-        var results = j["Results"] as JArray;
-        if (results == null) return "";
+        string qs = "Query=" + Uri.EscapeDataString(title) + (tv ? "" : "&year=" + year);
+        var results = await JacredSearch.Aggregate(qs, applyHideFilter: false, profileId: null);
 
         var yr = tv ? null : new Regex(@"(?<!\d)" + year + @"(?!\d)");
         string best = ""; int bestScore = -1;

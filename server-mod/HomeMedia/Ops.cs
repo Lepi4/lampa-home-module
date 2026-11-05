@@ -556,17 +556,22 @@ public class KpImportController : BaseController
         ContentType = "application/json; charset=utf-8",
         StatusCode = code
     };
+    static bool AdminWrite(Microsoft.AspNetCore.Http.HttpRequest r, Microsoft.AspNetCore.Http.HttpContext ctx)
+        => Guard.Ok(r) && (!Profiles.Enabled || Profiles.FromRequest(ctx)?.Admin == true);
 
     [HttpGet, AllowAnonymous]
     [Route("home/kp/folders")]
     public async Task<ActionResult> Folders()
-        => Json(new { folders = await KpImport.Folders(KpStore.DefaultProfile), last = KpImport.Last });
+    {
+        if (!AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
+        return Json(new { folders = await KpImport.Folders(KpStore.DefaultProfile), last = KpImport.Last });
+    }
 
     [HttpGet, HttpPost, AllowAnonymous]
     [Route("home/kp/folders/set")]
     public async Task<ActionResult> SetFolders(string ids = "")
     {
-        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!AdminWrite(Request, HttpContext)) return Json(new { error = "admin_required" }, 403);
         KpImport.SetSelected((ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         int n = await KpImport.Run(KpStore.DefaultProfile);
         return Json(new { ok = true, added = n, last = KpImport.Last });

@@ -8,7 +8,7 @@
   if (!window.__home_state) window.__home_state = function (tl) {
     var time = (tl && tl.time) || 0, dur = (tl && tl.duration) || 0;
     var p = (tl && tl.percent) || (dur ? time / dur * 100 : 0);
-    var done = dur > 0 ? ((dur - time <= Math.min(600, dur * 0.12) && time >= dur * 0.5) || p >= 90) : p >= 90;
+    var done = dur > 0 ? ((dur - time <= Math.min(600, dur * 0.12) && time >= dur * 0.5) || p >= 90) : false;
     if (done) return { s: 'watched', p: 100, at: (tl && tl.updated) || 0 };
     if (time >= 30 || p >= 2) return { s: 'started', p: Math.max(p, 3), at: (tl && tl.updated) || 0 };
     return { s: '', p: 0, at: (tl && tl.updated) || 0 };

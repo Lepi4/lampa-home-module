@@ -746,9 +746,14 @@ class MainActivity : BaseActivity(),
                     }
                     // окно было пересоздано во время просмотра: открываем последний экран Lampa (карточка, список) вместо главной
                     if (generation == mcDocument.generation && mcReady && mcRestoreLast) {
-                        mcRestoreLast = false
-                        delay(1200)
-                        runVoidJsFunc("(function(){try{var a=JSON.parse(localStorage.getItem('mc_last_activity')||'null');localStorage.removeItem('mc_last_activity');if(a&&a.component&&a.component!=='main'&&Lampa.Activity.all().length<2){window.__mc_ret=1;Lampa.Activity.push(a)}}catch(e){}})", "")
+                        if (!mcShellHidden || mcReturnToShell) {
+                            Log.i(TAG, "restore_last skipped: shell visible")
+                            mcRestoreLast = false
+                        } else {
+                            mcRestoreLast = false
+                            delay(1200)
+                            runVoidJsFunc("(function(){try{var a=JSON.parse(localStorage.getItem('mc_last_activity')||'null');localStorage.removeItem('mc_last_activity');if(a&&a.component&&a.component!=='main'&&Lampa.Activity.all().length<2){window.__mc_ret=1;Lampa.Activity.push(a)}}catch(e){}})()", "")
+                        }
                     }
                 }
                 // Process delayed functions with safe iteration
@@ -1682,9 +1687,13 @@ class MainActivity : BaseActivity(),
                 runVoidJsFunc(opener, "'$escaped'")
             }
         }
-        // Lampa Media Center: оболочка просит выполнить функцию страницы (например, запуск YouTube-видео)
-        intent.getStringExtra("mc_js")?.let { fn ->
-            if (fn.isNotBlank()) runVoidJsFunc(fn, intent.getStringExtra("mc_arg") ?: "")
+        // Сырой mc_js только из mcOpen (trustedHomeNavigation); внешний startActivity не получает флаг
+        if (trustedHomeNavigation) {
+            intent.getStringExtra("mc_js")?.let { fn ->
+                if (fn.isNotBlank()) runVoidJsFunc(fn, intent.getStringExtra("mc_arg") ?: "")
+            }
+            intent.removeExtra("mc_js")
+            intent.removeExtra("mc_arg")
         }
         // Fix initial focus
         if(!intent.getBooleanExtra("mc_hold_shell",false)&&!intent.getBooleanExtra("mc_keep_shell",false))browser?.setFocus()
@@ -4384,7 +4393,7 @@ class MainActivity : BaseActivity(),
         durationMillis: Int,
         ended: Boolean
     ): PlayerStateManager.PlaylistItem {
-        val percent = if (durationMillis > 0) (positionMillis.toLong() * 100L / durationMillis.toLong()).coerceIn(0L, 100L).toInt() else 100
+        val percent = if (durationMillis > 0) (positionMillis.toLong() * 100L / durationMillis.toLong()).coerceIn(0L, 100L).toInt() else 0
         return item.copy(
             timeline = PlayerStateManager.PlaylistItem.Timeline(
                 hash = item.timeline?.hash ?: "0",

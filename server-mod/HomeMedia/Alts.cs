@@ -120,9 +120,7 @@ public class AltsController : BaseController
         return o;
     });
 
-    static readonly HttpClient jr = new() { Timeout = TimeSpan.FromSeconds(25) };
-
-    static Task<JObject> PartTorrent(string media, long tmdb) => Part($"tr:{media}:{tmdb}", async () =>
+    static Task<JObject> PartTorrent(string media, long tmdb, string profileId) => Part($"tr:{profileId}:{media}:{tmdb}", async () =>
     {
         var o = new JObject { ["torrent"] = null, ["tvoices"] = new JArray() };
         bool tv = media == "tv";
@@ -132,16 +130,15 @@ public class AltsController : BaseController
         string year = ((string)(tv ? card["first_air_date"] : card["release_date"]) ?? "").Split('-')[0];
         if (string.IsNullOrEmpty(title)) return o;
 
-        // качество (кэш CardQuality) и озвучки раздач — параллельно
         var qTask = year.Length == 4 ? CardQuality.Lookup(tmdb, title, year, tv) : Task.FromResult("");
         var vTask = Task.Run(async () =>
         {
             var tr = new JArray();
-            string url = "http://127.0.0.1:9118/jr/api/v2.0/indexers/all/results?apikey=&Query=" + Uri.EscapeDataString(title) + (!tv && year.Length == 4 ? "&year=" + year : "");
-            var j = JObject.Parse(await jr.GetStringAsync(url));
+            string qs = "Query=" + Uri.EscapeDataString(title) + (!tv && year.Length == 4 ? "&year=" + year : "");
+            var results = await JacredSearch.Aggregate(qs, applyHideFilter: true, profileId: profileId);
             string nt = AnimeCatalog.Norm(title);
             var cnt = new Dictionary<string, (int n, int tier)>();
-            foreach (var r in ((JArray)(j["Results"] ?? new JArray())).Children<JObject>())
+            foreach (var r in results.Children<JObject>())
             {
                 string t = (string)r["Title"] ?? "";
                 if (nt.Length >= 4 && !AnimeCatalog.Norm(t).Contains(nt)) continue;
@@ -171,7 +168,8 @@ public class AltsController : BaseController
     // все части вместе (для «Продолжить»)
     static async Task<JObject> Collect(string media, long tmdb, string prof)
     {
-        var tk = PartKp(media, tmdb, prof); var ta = PartAnime(media, tmdb); var tt = PartTorrent(media, tmdb);
+        string profileId = Profiles.CurrentId;
+        var tk = PartKp(media, tmdb, prof); var ta = PartAnime(media, tmdb); var tt = PartTorrent(media, tmdb, profileId);
         await Task.WhenAll(tk, ta, tt);
         var o = new JObject { ["kinopub_eps"] = tk.Result["kinopub_eps"] ?? new JArray(), ["anime"] = ta.Result["anime"] ?? new JArray(), ["torrent"] = tt.Result["torrent"], ["tvoices"] = tt.Result["tvoices"] ?? new JArray() };
         if (tk.Result["kp"] != null) o["kp"] = tk.Result["kp"];
@@ -233,7 +231,7 @@ public class AltsController : BaseController
     public async Task<ActionResult> SrcQ(string media = "tv", long tmdb = 0)
     {
         if ((media != "tv" && media != "movie") || tmdb <= 0) return Json(new { error = "bad_args" }, 400);
-        var tk = PartKp(media, tmdb, KpStore.ResolveProfile(Request.Query["profile"].FirstOrDefault())); var ta = PartAnime(media, tmdb); var tt = PartTorrent(media, tmdb);
+        var tk = PartKp(media, tmdb, KpStore.ResolveProfile(Request.Query["profile"].FirstOrDefault())); var ta = PartAnime(media, tmdb); var tt = PartTorrent(media, tmdb, Profiles.CurrentId);
         await Task.WhenAll(tk, ta, tt);
         int[] px = { 480, 720, 1080, 2160 };
         string F(int t) => t < 0 ? null : CardQuality.Labels[t] + " · " + px[t] + "p";
@@ -294,7 +292,7 @@ public class AltsController : BaseController
         }
         if (part == null || part == "torrents")
         {
-            var tr = await PartTorrent(media, tmdb);
+            var tr = await PartTorrent(media, tmdb, Profiles.CurrentId);
             res["torrents"] = tr["tvoices"] ?? new JArray();
             res["torrents_q"] = PrettyQ((string)tr["torrent"]?["label"]);
         }

@@ -452,7 +452,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         o("demuxer-readahead-secs", (wait + 5).toString())
         o("demuxer-max-bytes", "32MiB")
         o("network-timeout", "15")
-        o("tls-verify", "no")
+        o("tls-verify", "yes")
         o("deinterlace", "no")
         // заголовки из запроса (User-Agent отдельно)
         intent.getStringArrayExtra("headers")?.let { h ->

@@ -56,7 +56,10 @@ function scope(node){if(!node||node.nodeType!==1)return;['src','href','action','
 document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a');if(a)scope(a);},true);
 new MutationObserver(function(events){events.forEach(function(e){if(e.type==='attributes')scope(e.target);else Array.prototype.forEach.call(e.addedNodes,function(n){scope(n);if(n.querySelectorAll)Array.prototype.forEach.call(n.querySelectorAll('[src],[href],[action],[poster]'),scope);});});}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['src','href','action','poster']});
 })();</script>".Replace("__BASE__", Newtonsoft.Json.JsonConvert.SerializeObject(prefix));
-        return InsertBeforeHeadEnd(text, script);
+        // Install URL hooks before synchronous upstream scripts can call fetch,
+        // XHR or WebSocket. Keep the effective base before those hooks too.
+        var effectiveBase = BaseTagRx.Matches(text).Cast<Match>().FirstOrDefault(m => HrefQuotedRx.IsMatch(m.Value) || HrefUnquotedRx.IsMatch(m.Value));
+        return effectiveBase != null ? text.Insert(effectiveBase.Index + effectiveBase.Length, script) : InsertAfterHead(text, script);
     }
 
     static readonly Regex BaseTagRx = new(@"<base\b[^>]*>", RegexOptions.IgnoreCase);
@@ -65,9 +68,10 @@ new MutationObserver(function(events){events.forEach(function(e){if(e.type==='at
 
     static string EnsureBase(string text, string prefix, string requestPath)
     {
+        string fallback = MapBase("./", prefix, requestPath);
         var match = BaseTagRx.Match(text);
         if (!match.Success)
-            return InsertAfterHead(text, "<base href='" + WebUtility.HtmlEncode(prefix) + "'>");
+            return InsertAfterHead(text, "<base href='" + WebUtility.HtmlEncode(fallback) + "'>");
         string tag = match.Value;
         var quoted = HrefQuotedRx.Match(tag);
         if (quoted.Success)
@@ -90,7 +94,7 @@ new MutationObserver(function(events){events.forEach(function(e){if(e.type==='at
             else
             {
                 int close = tag.EndsWith("/>", StringComparison.Ordinal) ? tag.Length - 2 : tag.Length - 1;
-                tag = tag.Insert(close, " href='" + WebUtility.HtmlEncode(prefix) + "'");
+                tag = tag.Insert(close, " href='" + WebUtility.HtmlEncode(fallback) + "'");
             }
         }
         return text.Substring(0, match.Index) + tag + text.Substring(match.Index + match.Length);

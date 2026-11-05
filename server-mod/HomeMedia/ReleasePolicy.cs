@@ -15,13 +15,21 @@ namespace HomeMedia;
 public static class ReleasePolicy
 {
     static readonly Regex reSubs = new(@"\bСТ\b|\[СТ\]|\bSub\b|\bSUB\b|субтитр", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    static readonly Regex reRu = new(@"Дубл|дубл|MVO|DVO|AVO|\bПМ\b|\bЛД\b|\bЛМ\b|\bАП\b|озвуч|Озвуч|Многоголос|Закадров|\bDUB\b|\bRUS\b|\bрус", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    static readonly Regex reRu = new(@"Дубл|дубл|\bMVO\b|\bDVO\b|\bAVO\b|\bПМ\b|\bЛД\b|\bЛМ\b|\bАП\b|озвуч|Озвуч|Многоголос|Закадров|\bDUB\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    public const int RuClassifierVersion = 2;
     static readonly string[] TypeRank = { "TS", "DVD", "HDRIP", "WEBRIP", "WEBDL", "BDRIP" };
     static readonly HashSet<string> Cam = new(StringComparer.OrdinalIgnoreCase)
         { "TS", "CAMRIP", "CAM", "HDCAM", "TC", "TELESYNC", "TELECINE", "SCREENER", "DVDSCR", "TSRIP" };
 
-    public static JObject Settings => (JObject)(Profiles.Get(Profiles.CurrentId)?["settings"] ?? new JObject());
-    public static bool AllowSubtitlesOnly => (bool?)Settings["allow_subtitles_only"] == true;
+    public static JObject SettingsFor(string profileId) =>
+        (JObject)(Profiles.Get(profileId)?["settings"] ?? new JObject());
+
+    public static JObject Settings => SettingsFor(Profiles.CurrentId);
+
+    public static bool AllowSubtitlesOnlyFor(string profileId) =>
+        (bool?)SettingsFor(profileId)["allow_subtitles_only"] == true;
+
+    public static bool AllowSubtitlesOnly => AllowSubtitlesOnlyFor(Profiles.CurrentId);
 
     public static string NormType(string t)
     {
@@ -32,10 +40,12 @@ public static class ReleasePolicy
 
     public static bool AllowedType(string t) => Array.IndexOf(TypeRank, NormType(t)) >= 0;
 
-    public static HashSet<string> Blocked =>
-        new(((Settings["feed_block_quality"] as JArray) ?? new JArray())
+    public static HashSet<string> BlockedFor(string profileId) =>
+        new(((SettingsFor(profileId)["feed_block_quality"] as JArray) ?? new JArray())
             .Select(x => NormType((string)x))
             .Where(x => x.Length > 0), StringComparer.OrdinalIgnoreCase);
+
+    public static HashSet<string> Blocked => BlockedFor(Profiles.CurrentId);
 
     static int Rank(string type)
     {
@@ -43,6 +53,12 @@ public static class ReleasePolicy
         for (int i = 0; i < TypeRank.Length; i++) if (TypeRank[i] == type) return i;
         return -1;
     }
+
+    public static int TypeRankScore(string type) => Rank(NormType(type));
+
+    public static bool BetterRelease(int typeRank, int tier, int seeders, int curTypeRank, int curTier, int curSeeders)
+        => typeRank > curTypeRank || (typeRank == curTypeRank && (tier > curTier || (tier == curTier && seeders > curSeeders)));
+
 
     public static bool IsSubtitlesOnly(string title) => reSubs.IsMatch(title ?? "") && !reRu.IsMatch(title ?? "");
 
@@ -52,20 +68,21 @@ public static class ReleasePolicy
         var voices = r["info"]?["voices"] as JArray;
         var langs = r["languages"] as JArray;
         bool rus = langs != null && langs.Any(x => (string)x == "rus");
-        return (voices != null && voices.Count > 0) || reRu.IsMatch(t) || (rus && !IsSubtitlesOnly(t));
+        if (IsSubtitlesOnly(t)) return (voices != null && voices.Count > 0);
+        return (voices != null && voices.Count > 0) || reRu.IsMatch(t) || rus;
     }
 
     // true => раздачу нужно скрыть, если профиль не разрешает релизы только с субтитрами
-    public static bool Hide(JObject r) =>
-        IsSubtitlesOnly((string)r["Title"] ?? "") && !HasRuAudio(r) && !AllowSubtitlesOnly;
+    public static bool Hide(JObject r, string profileId) =>
+        IsSubtitlesOnly((string)r["Title"] ?? "") && !HasRuAudio(r) && !AllowSubtitlesOnlyFor(profileId);
 
-    public static bool BlockedQuality(JObject r)
+    public static bool BlockedQuality(JObject r, string profileId)
     {
         string type = NormType(CardQuality.TypeLabel((string)r["Title"] ?? ""));
-        return type.Length > 0 && Blocked.Contains(type);
+        return type.Length > 0 && BlockedFor(profileId).Contains(type);
     }
 
-    public static void Track(string media, long tmdb, string title)
+    public static void Track(string media, long tmdb, string title, string profileId)
     {
         if (tmdb <= 0) return;
         string type = NormType(CardQuality.TypeLabel(title));
@@ -76,14 +93,15 @@ public static class ReleasePolicy
         {
             var row = HomeDb.Query(c,
                 "SELECT type,tier FROM release_events WHERE profile_id=@p AND media=@m AND tmdb=@t",
-                ("@p", Profiles.CurrentId), ("@m", media), ("@t", tmdb)).FirstOrDefault();
+                ("@p", profileId), ("@m", media), ("@t", tmdb)).FirstOrDefault();
             int oldTier = row?[1] is long l ? (int)l : -1;
             int oldRank = row?[0] is string s ? Rank(s) : -1;
-            if (row != null && (tier < oldTier || (tier == oldTier && rank <= oldRank))) return;
+            // Тип релиза старше разрешения: WEB-DL 720 не уступает TS 2160.
+            if (row != null && !BetterRelease(rank, tier, 0, oldRank, oldTier, 0)) return;
             HomeDb.Exec(c, @"INSERT INTO release_events(profile_id,media,tmdb,type,tier,event_at)
                 VALUES(@p,@m,@t,@ty,@ti,@at)
                 ON CONFLICT(profile_id,media,tmdb) DO UPDATE SET type=@ty,tier=@ti,event_at=@at",
-                ("@p", Profiles.CurrentId), ("@m", media), ("@t", tmdb),
+                ("@p", profileId), ("@m", media), ("@t", tmdb),
                 ("@ty", type), ("@ti", tier), ("@at", HomeDb.Now()));
         });
     }
@@ -112,9 +130,10 @@ public static class ReleasePolicy
     public static async Task<bool?> EpisodeHasRuAsync(string media, long tmdb, string title, int season, int episode)
     {
         if (tmdb <= 0 || season <= 0 || episode <= 0 || string.IsNullOrWhiteSpace(title)) return null;
+        string profileId = Profiles.CurrentId;
         var cached = HomeDb.With(c => HomeDb.Query(c,
             "SELECT has_ru,checked_at FROM release_episodes WHERE profile_id=@p AND media=@m AND tmdb=@t AND season=@s AND episode=@e",
-            ("@p", Profiles.CurrentId), ("@m", media), ("@t", tmdb), ("@s", season), ("@e", episode))).FirstOrDefault();
+            ("@p", profileId), ("@m", media), ("@t", tmdb), ("@s", season), ("@e", episode))).FirstOrDefault();
         if (cached != null)
         {
             bool ru = Convert.ToInt64(cached[0]) != 0;
@@ -127,15 +146,13 @@ public static class ReleasePolicy
         {
             try
             {
-                string url = "http://127.0.0.1:9118/jr/api/v2.0/indexers/all/results?apikey=&Query=" + Uri.EscapeDataString(q);
-                var j = JObject.Parse(await episodeHttp.GetStringAsync(url));
-                if (j["Results"] is not JArray arr) continue;
+                var arr = await JacredSearch.Aggregate("Query=" + Uri.EscapeDataString(q), applyHideFilter: true, profileId: profileId);
                 result = false;
                 foreach (var r in arr.Children<JObject>())
                 {
                     if (!int.TryParse((string)r["Seeders"] ?? "0", out int sd) || sd <= 0) continue;
                     if (ParseEpisode((string)r["Title"] ?? "") != (season, episode)) continue;
-                    if (Hide(r)) continue;
+                    if (Hide(r, profileId)) continue;
                     if (HasRuAudio(r)) { result = true; break; }
                 }
                 if (result == true) break;
@@ -147,7 +164,7 @@ public static class ReleasePolicy
         HomeDb.With(c => HomeDb.Exec(c, @"INSERT INTO release_episodes(profile_id,media,tmdb,season,episode,has_ru,checked_at)
             VALUES(@p,@m,@t,@s,@e,@ru,@at)
             ON CONFLICT(profile_id,media,tmdb,season,episode) DO UPDATE SET has_ru=@ru,checked_at=@at",
-            ("@p", Profiles.CurrentId), ("@m", media), ("@t", tmdb), ("@s", season), ("@e", episode),
+            ("@p", profileId), ("@m", media), ("@t", tmdb), ("@s", season), ("@e", episode),
             ("@ru", result == true ? 1 : 0), ("@at", HomeDb.Now())));
         return result;
     }
@@ -191,30 +208,40 @@ public static class ReleasePolicy
 // Сеть только в фоне. Горячий путь (ProfileAvailability/LastPlay) читает release_episodes.
 public static class ReleaseIndexer
 {
-    static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(10) };
     static readonly SemaphoreSlim gate = new(2, 2);
     static readonly ConcurrentDictionary<string, Task> pending = new();
+
+    static void EnsureClassifierVersion()
+    {
+        int v = int.TryParse(HomeDb.Get("release_classifier_ver"), out var x) ? x : 0;
+        if (v >= ReleasePolicy.RuClassifierVersion) return;
+        // checked_at=0 снимает кэш EpisodeHasRu (ложный has_ru=0 ещё 6 часов).
+        HomeDb.With(c => HomeDb.Exec(c, "UPDATE release_episodes SET has_ru=0, checked_at=0"));
+        HomeDb.Set("release_classifier_ver", ReleasePolicy.RuClassifierVersion.ToString());
+    }
 
     public static Task Ensure(string media, long tmdb, string title)
     {
         if (tmdb <= 0 || string.IsNullOrWhiteSpace(title)) return Task.CompletedTask;
-        string key = Profiles.CurrentId + "|" + media + "|" + tmdb;
+        string profileId = Profiles.CurrentId;
+        string key = profileId + "|" + media + "|" + tmdb;
         return pending.GetOrAdd(key, k => Task.Run(async () =>
         {
             await gate.WaitAsync();
-            try { await Refresh(media, tmdb, title); }
+            try { await Refresh(media, tmdb, title, profileId); }
             catch { }
             finally { gate.Release(); pending.TryRemove(key, out _); }
         }));
     }
 
-    static async Task Refresh(string media, long tmdb, string title)
+    static async Task Refresh(string media, long tmdb, string title, string profileId)
     {
-        string url = "http://127.0.0.1:9118/jr/api/v2.0/indexers/all/results?apikey=&Query="
-                   + Uri.EscapeDataString(title);
-        var j = JObject.Parse(await http.GetStringAsync(url));
-        if (j["Results"] is not JArray results) return;      // источник не ответил — индекс не меняем
+        EnsureClassifierVersion();
+        // has_ru считается по аудио, поэтому субтитровые раздачи остаются в выборке.
+        var results = await JacredSearch.Aggregate("Query=" + Uri.EscapeDataString(title), applyHideFilter: false, profileId: profileId);
+        if (results.Count == 0) return;
 
+        var episodes = new Dictionary<(int s, int e), (bool ru, int tier, string type, int sd, int typeRank)>();
         foreach (var r in results.Children<JObject>())
         {
             if (!int.TryParse((string)r["Seeders"] ?? "0", out int sd) || sd <= 0) continue;
@@ -222,21 +249,59 @@ public static class ReleaseIndexer
             bool ru = ReleasePolicy.HasRuAudio(r);
             int tier = CardQuality.Tier(t);
             string type = ReleasePolicy.NormType(CardQuality.TypeLabel(t));
+            int typeRank = ReleasePolicy.TypeRankScore(type);
             foreach (var (s, e) in ReleasePolicy.ParseEpisodes(t))
             {
-                HomeDb.With(c => HomeDb.Exec(c, @"
+                var key = (s, e);
+                if (!episodes.TryGetValue(key, out var cur))
+                    episodes[key] = (ru, tier, type, sd, typeRank);
+                else
+                {
+                    bool ru2 = cur.ru || ru;
+                    if (ReleasePolicy.BetterRelease(typeRank, tier, sd, cur.typeRank, cur.tier, cur.sd))
+                        episodes[key] = (ru2, tier, type, sd, typeRank);
+                    else
+                        episodes[key] = (ru2, cur.tier, cur.type, cur.sd, cur.typeRank);
+                }
+            }
+        }
+        foreach (var kv in episodes)
+        {
+            var (s, e) = kv.Key;
+            var v = kv.Value;
+            int tier = v.tier, sd = v.sd, typeRank = v.typeRank;
+            string type = v.type;
+            HomeDb.With(c =>
+            {
+                var row = HomeDb.Query(c,
+                    "SELECT best_tier,best_type,seeders FROM release_episodes WHERE profile_id=@p AND media=@m AND tmdb=@t AND season=@s AND episode=@e",
+                    ("@p", profileId), ("@m", media), ("@t", tmdb), ("@s", s), ("@e", e)).FirstOrDefault();
+                if (row != null)
+                {
+                    int oldTier = Convert.ToInt32(row[0]);
+                    string oldType = (string)row[1] ?? "";
+                    int oldSd = Convert.ToInt32(row[2]);
+                    int oldRank = ReleasePolicy.TypeRankScore(oldType);
+                    if (!ReleasePolicy.BetterRelease(typeRank, tier, sd, oldRank, oldTier, oldSd))
+                    {
+                        tier = oldTier;
+                        type = oldType;
+                    }
+                    if (oldSd > sd) sd = oldSd;
+                }
+                HomeDb.Exec(c, @"
                     INSERT INTO release_episodes(profile_id,media,tmdb,season,episode,has_ru,best_tier,best_type,seeders,checked_at)
                     VALUES(@p,@m,@t,@s,@e,@ru,@tier,@type,@sd,@at)
                     ON CONFLICT(profile_id,media,tmdb,season,episode) DO UPDATE SET
                       has_ru=MAX(release_episodes.has_ru,@ru),
-                      best_tier=MAX(release_episodes.best_tier,@tier),
-                      best_type=CASE WHEN @tier>release_episodes.best_tier THEN @type ELSE release_episodes.best_type END,
-                      seeders=MAX(release_episodes.seeders,@sd),
+                      best_tier=@tier,
+                      best_type=@type,
+                      seeders=@sd,
                       checked_at=@at",
-                    ("@p", Profiles.CurrentId), ("@m", media), ("@t", tmdb),
-                    ("@s", s), ("@e", e), ("@ru", ru ? 1 : 0), ("@tier", tier),
-                    ("@type", type), ("@sd", sd), ("@at", HomeDb.Now())));
-            }
+                    ("@p", profileId), ("@m", media), ("@t", tmdb),
+                    ("@s", s), ("@e", e), ("@ru", v.ru ? 1 : 0), ("@tier", tier),
+                    ("@type", type), ("@sd", sd), ("@at", HomeDb.Now()));
+            });
         }
     }
 }

@@ -64,7 +64,7 @@
   function isDone(tl) {
     try { if (window.__home_state) return window.__home_state(tl).s === 'watched'; } catch (e) {}
     var time = tl.time || 0, dur = tl.duration || 0, p = tl.percent || (dur ? time / dur * 100 : 0);
-    return dur > 0 ? ((dur - time <= Math.min(600, dur * 0.12) && time >= dur * 0.5) || p >= 90) : p >= 90;
+    return dur > 0 ? ((dur - time <= Math.min(600, dur * 0.12) && time >= dur * 0.5) || p >= 90) : false;
   }
 
   var MAP = {};      // хеш позиции -> { hs, card, title }
