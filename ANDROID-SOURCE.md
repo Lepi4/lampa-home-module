@@ -18,20 +18,20 @@ Android-клиент основан на [lampa-app/LAMPA](https://github.com/la
 
 ## Сборка опубликованной версии
 
-В репозитории находится APK `release/2026.11.05.2/LMPC-1.16.25-1143.apk`. Для сборки этой версии используйте JDK 17 и Android SDK Platform 34. Gradle и зависимости загружаются из репозиториев, указанных в проекте; нужен доступ в интернет.
+В репозитории находится APK `release/2026.11.05.3/LMPC-1.16.26-1144.apk`. Для сборки этой версии используйте JDK 17 и Android SDK Platform 34. Gradle и зависимости загружаются из репозиториев, указанных в проекте; нужен доступ в интернет.
 
 Linux/macOS:
 
 ```bash
 cd LAMPA
-bash gradlew assembleMcRelease -PappVersionCode=1143 -PappVersionName=1.16.25
+bash gradlew assembleMcRelease -PappVersionCode=1144 -PappVersionName=1.16.26
 ```
 
 Windows PowerShell:
 
 ```powershell
 cd LAMPA
-.\gradlew.bat assembleMcRelease -PappVersionCode=1143 -PappVersionName=1.16.25
+.\gradlew.bat assembleMcRelease -PappVersionCode=1144 -PappVersionName=1.16.26
 ```
 
 Результат находится в `LAMPA/app/build/outputs/apk/mc/release/`. Для варианта mc используется идентификатор приложения `app.lampac.home.mc`.

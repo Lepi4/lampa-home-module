@@ -118,6 +118,7 @@ class HomePlayerActivity : Activity() {
     private var tvNowUrl: String? = null
     @Volatile private var epgMap: JSONObject? = null
     private var digits = ""
+    private val DIGIT_TIMEOUT_MS = 3_000L
     private var chNames: List<String> = emptyList()
     private var chUris: List<String> = emptyList()
     private var panel: LinearLayout? = null
@@ -151,10 +152,26 @@ class HomePlayerActivity : Activity() {
         val n = digits.toIntOrNull()
         digits = ""
         statusView.text = ""
-        val limit = if (live) chUris.size else if (::player.isInitialized) player.mediaItemCount else 0
-        if (n != null && n >= 1 && n <= limit) {
-            if (live) selectLiveChannel(n - 1, "number") else player.seekTo(n - 1, C.TIME_UNSET)
+        if (!live || panelOpen || menuMode) return@Runnable
+        if (n != null && n in 1..chUris.size) {
+            selectLiveChannel(n - 1, "number")
+        } else if (n != null) {
+            statusView.text = "Нет канала $n"
+            ui.postDelayed({ if (statusView.text == "Нет канала $n") statusView.text = "" }, 1_200L)
         }
+    }
+
+    private fun cancelDigits() {
+        digits = ""
+        ui.removeCallbacks(commitDigits)
+    }
+
+    private fun onDigit(keyCode: Int) {
+        if (digits.length >= 3) digits = ""
+        digits += (keyCode - KeyEvent.KEYCODE_0).toString()
+        statusView.text = "Канал $digits"
+        ui.removeCallbacks(commitDigits)
+        ui.postDelayed(commitDigits, DIGIT_TIMEOUT_MS)
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -1661,7 +1678,11 @@ class HomePlayerActivity : Activity() {
         // Route resting TV keys before PlayerView/focused children can consume
         // them. Opening the list must not depend on Android key tracking/focus.
         val openList = event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN || event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT
-        val handled = if (live && ok && liveOk.isPressed) {
+        val handled = if (live && !panelOpen && !menuMode && !finished &&
+            event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 &&
+            event.keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9) {
+            onDigit(event.keyCode); true
+        } else if (live && ok && liveOk.isPressed) {
             if (event.action == KeyEvent.ACTION_UP) liveOk.release(event.isCanceled)
             true
         } else if (live && !panelOpen && !menuMode && (ok || openList)) {
@@ -1682,6 +1703,7 @@ class HomePlayerActivity : Activity() {
     }
 
     private fun showPanel() {
+        cancelDigits()
         val p = panel ?: return
         setOverlay(false)
         setInfoVisible(false)
@@ -1844,6 +1866,7 @@ class HomePlayerActivity : Activity() {
     // ---------- панель ----------
 
     private fun setOverlay(show: Boolean, menu: Boolean = false) {
+        if (show) cancelDigits()
         ui.removeCallbacks(hideOverlay)
         menuMode = show && menu
         overlay.visibility = if (show) View.VISIBLE else View.INVISIBLE
@@ -2016,13 +2039,10 @@ class HomePlayerActivity : Activity() {
             }
             return super.onKeyDown(keyCode, event)
         }
-        if (live) {
+        if (live && !panelOpen && !menuMode) {
             // цифры — номер канала
             if (keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9) {
-                digits += (keyCode - KeyEvent.KEYCODE_0).toString()
-                statusView.text = "Канал $digits"
-                ui.removeCallbacks(commitDigits)
-                ui.postDelayed(commitDigits, 1500)
+                onDigit(keyCode)
                 return true
             }
             if (!menuMode) when (keyCode) {
@@ -2401,6 +2421,7 @@ class HomePlayerActivity : Activity() {
     private fun closePlayer() {
         if (finished) return
         finished = true
+        cancelDigits()
         pendingLiveRetry?.let { ui.removeCallbacks(it); pendingLiveRetry = null }
         ytRefreshEpoch++
         ytRefreshConnection?.disconnect()
@@ -2462,6 +2483,7 @@ class HomePlayerActivity : Activity() {
 
     override fun onStop() {
         ytForeground = false
+        cancelDigits()
         pendingLiveRetry?.let { ui.removeCallbacks(it); pendingLiveRetry = null }
         channelOk.cancel()
         liveOk.cancel()
