@@ -463,6 +463,7 @@ public class KinoPubCardsController : BaseController
                     if(mode!="top_new")await Availability.Filter(candidates,(mode=="new_movie"||mode=="new_cartoon"||mode=="ru_movie")?"movie":"tv",null,Prof(),400);
                 },HttpContext.RequestAborted);
                 await CardQuality.Enrich(filled.results);
+                ReleasePolicy.DropBlocked(filled.results);
                 return Json(new{results=filled.results,page,total_pages=filled.pages,has_more=filled.more,retry_page=filled.more&&filled.results.Count==0});
             }catch{return new ContentResult{Content="{\"error\":\"catalog_unavailable\"}",ContentType="application/json",StatusCode=502};}
         }
@@ -507,6 +508,7 @@ public class KinoPubCardsController : BaseController
                 if (mode != "top_new") await Availability.Filter(candidates, (mode == "new_movie" || mode == "new_cartoon" || mode == "ru_movie") ? "movie" : "tv", null, Prof(), 400);
             });
             await CardQuality.Enrich(filled.results);
+            ReleasePolicy.DropBlocked(filled.results);
             return (filled.results, filled.more);
         }
         var res = await CardsCore(mode, page);
@@ -653,6 +655,8 @@ public class KinoPubCardsController : BaseController
                     string kind=CardKind.Kind(card);if(animeMovies?kind!="anime_movie":cartoonMovies?kind!="cartoon_movie":kind!="movie")card.Remove();
                 }
                 if(!catalogScan)await CardQuality.Enrich(r.results);
+                if(!catalogScan && mode != "my_movies" && !(mode ?? "").StartsWith("plex"))
+                    ReleasePolicy.DropBlocked(r.results);
                 bool more=page<r.totalPages;
                 return Json(new { results = r.results, page, total_pages = r.totalPages, has_more = more, kino_unavailable = cloudUnavailable });
             }

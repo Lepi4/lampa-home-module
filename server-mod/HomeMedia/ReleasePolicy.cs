@@ -89,6 +89,29 @@ public static class ReleasePolicy
         return type.Length > 0 && BlockedFor(profileId).Contains(type);
     }
 
+    // Метка на постере («TS», «TS HD») принадлежит скрытому типу. Карточка уже попала в список,
+    // если проверка раздачи не успела: из ленты её убираем по самой метке.
+    public static bool LabelBlocked(string label, string profileId)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return false;
+        var blocked = BlockedFor(profileId);
+        if (blocked.Count == 0) return false;
+        foreach (var tok in label.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            if (blocked.Contains(NormType(tok))) return true;
+        return false;
+    }
+
+    public static void DropBlocked(JArray cards)
+    {
+        string profileId = Profiles.CurrentId;
+        if (cards == null || BlockedFor(profileId).Count == 0) return;
+        foreach (var c in cards.Children<JObject>().ToList())
+        {
+            string q = (string)c["release_quality"] ?? (string)c["cp_quality"] ?? "";
+            if (LabelBlocked(q, profileId)) c.Remove();
+        }
+    }
+
     public static void Track(string media, long tmdb, string title, string profileId)
     {
         if (tmdb <= 0) return;

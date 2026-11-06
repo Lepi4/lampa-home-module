@@ -29,7 +29,7 @@ public static class CardQuality
     static readonly Regex r4k = new(@"2160[pi]?|\b4K\b|\bUHD\b|\b4К\b", RegexOptions.IgnoreCase);
     static readonly Regex r1080 = new(@"1080[pi]?|\bFull ?HD\b|\bFHD\b|BDRemux|\bRemux\b", RegexOptions.IgnoreCase);
     static readonly Regex r720 = new(@"\b720[pi]?\b", RegexOptions.IgnoreCase);
-    static readonly Regex rSd = new(@"\b(480|576|360)[pi]?\b|DVD-?Rip|\bDVD\b|SATRip|TVRip|VHS|\bTS\b|Telesync|\bTC\b|Telecine|CAM-?Rip|\bCAM\b|HDCAM", RegexOptions.IgnoreCase);
+    static readonly Regex rSd = new(@"\b(480|576|360)[pi]?\b|DVD-?Rip|\bDVD\b|SATRip|TVRip|VHS|\bTS\b|\bТС\b|Telesync|Телесинк|\bTC\b|Telecine|CAM-?Rip|\bCAM\b|HDCAM", RegexOptions.IgnoreCase);
     static readonly Regex rHdSrc = new(@"BDRip|Blu-?Ray|WEB-?DL|WEB-?Rip|HDRip|HDTV", RegexOptions.IgnoreCase);
 
     // 3 — 4K, 2 — FHD, 1 — HD, 0 — SD, -1 — по названию не определить
@@ -52,7 +52,7 @@ public static class CardQuality
         ("WEBRIP", 4, new Regex(@"WEB-?Rip", RegexOptions.IgnoreCase)),
         ("HDRIP", 3, new Regex(@"HDRip|HDTV", RegexOptions.IgnoreCase)),
         ("DVD", 2, new Regex(@"DVD-?Rip|\bDVD\b|SATRip|TVRip|VHS", RegexOptions.IgnoreCase)),
-        ("TS", 0, new Regex(@"\bTS(-?Rip)?\b|\bHDTS\b|\bHDTC\b|TS-?Rip|Telesync|\bTC\b|Telecine|CAM-?Rip|\bCAM\b|HDCAM|Screener|DVD-?Scr", RegexOptions.IgnoreCase)),
+        ("TS", 0, new Regex(@"\bTS(-?Rip)?\b|\bТС(-?рип)?\b|\bHDTS\b|\bHDTC\b|TS-?Rip|ТС-?Rip|Telesync|Телесинк|\bTC\b|Telecine|CAM-?Rip|\bCAM\b|HDCAM|Screener|DVD-?Scr", RegexOptions.IgnoreCase)),
     };
 
     // тип лучшего/первого совпавшего релиза: BDRIP/WEBDL/WEBRIP/HDRIP/DVD/TS; "" — не распознан

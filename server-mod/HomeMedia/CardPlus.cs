@@ -52,7 +52,9 @@ public class CardPlusController : BaseController
                 string year = (string)o["year"];
                 bool tv = (bool?)o["tv"] == true;
                 if (id <= 0 || string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(year)) return (tv, id, "");
-                return (tv, id, await CardQuality.Lookup(id, title, year, tv));
+                string q = await CardQuality.Lookup(id, title, year, tv);
+                if (ReleasePolicy.LabelBlocked(q, Profiles.CurrentId)) q = "";
+                return (tv, id, q);
             }).ToList();
 
             var res = new JObject();
