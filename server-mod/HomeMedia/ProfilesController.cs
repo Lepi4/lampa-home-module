@@ -20,6 +20,8 @@ public static class DevicePlayback
 
     public static JObject Validate(JObject body)
     {
+        // Меню отправляет объект, который только что прочитало, вместе со schema. Номер схемы назначает сервер.
+        if (body != null) body.Remove("schema");
         if (body == null || body.Properties().Any(p => !Fields.Contains(p.Name))
             || body["auto"]?.Type != JTokenType.Boolean
             || body["max_height"]?.Type != JTokenType.Integer
