@@ -131,6 +131,9 @@ public static class Availability
                 if (!int.TryParse((string)r["Seeders"] ?? "0", out int seeders) || seeders <= 0) continue;
                 string title = (string)r["Title"] ?? "";
                 if (!TitleMatch(q, title)) continue;
+                bool movie = (string)c["media_type"] == "movie" || (c["name"] == null && c["original_name"] == null && c["first_air_date"] == null);
+                string date = ((string)c["release_date"] ?? "").Split('-')[0];
+                if (movie && int.TryParse(date, out int cardYear) && !ReleasePolicy.MovieYearFits(title, cardYear, ru + " " + orig)) continue;
                 if (ReleasePolicy.Hide(r, profileId)) continue;
                 if (ReleasePolicy.BlockedQuality(r, profileId)) continue;
                 bool rus = ruOrig || (r["languages"] is JArray l && l.Any(x => (string)x == "rus"));

@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -224,6 +225,22 @@ public class KpSearchController : BaseController
         }
 
         string profileId = profileIdEarly;
+        int movieYear = 0, serial = -1;
+        var nameContext = new StringBuilder();
+        foreach (var part in qs.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            string key = Uri.UnescapeDataString(part.Substring(0, eq));
+            string val = Uri.UnescapeDataString(part.Substring(eq + 1));
+            if (key.Equals("year", StringComparison.OrdinalIgnoreCase)) int.TryParse(val, out movieYear);
+            else if (key.Equals("is_serial", StringComparison.OrdinalIgnoreCase)) int.TryParse(val, out serial);
+            else if (key.Equals("query", StringComparison.OrdinalIgnoreCase) || key.Equals("title", StringComparison.OrdinalIgnoreCase) || key.Equals("title_original", StringComparison.OrdinalIgnoreCase))
+                nameContext.Append(' ').Append(val);
+        }
+        // Lampa: сериал приходит как is_serial=2, фильм как 1, ручной поиск как 0. Чужой год убираем у фильма.
+        if (movieYear > 0 && serial != 2)
+            order = order.Where(k => ReleasePolicy.MovieYearFits((string)merged[k]["Title"], movieYear, nameContext.ToString())).ToList();
         var results = new JArray(order.Where(k => profileId == null || !ReleasePolicy.Hide(merged[k], profileId)).Select(k => merged[k]));
         return Content(JsonConvert.SerializeObject(new { Results = results }), "application/json; charset=utf-8");
     }

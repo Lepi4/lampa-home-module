@@ -83,6 +83,26 @@ public static class ReleasePolicy
     public static bool Hide(JObject r, string profileId) =>
         IsSubtitlesOnly((string)r["Title"] ?? "") && !HasRuAudio(r) && !AllowSubtitlesOnlyFor(profileId);
 
+    static readonly Regex ReleaseYear = new(@"(?<!\d)(?:19|20)\d{2}(?!\d)", RegexOptions.Compiled);
+
+    // A same-title release from another year is a different film. 1920 is a frame size, not a year.
+    // No year in the torrent title stays: an undated release is not evidence of the other film.
+    public static bool MovieYearFits(string torrentTitle, int year, string nameContext = null)
+    {
+        if (year < 1900 || year > 2100) return true;
+        var named = new HashSet<int>();
+        if (!string.IsNullOrEmpty(nameContext))
+            foreach (Match m in ReleaseYear.Matches(nameContext))
+                if (int.TryParse(m.Value, out int namedYear) && namedYear != 1920) named.Add(namedYear);
+        var found = new HashSet<int>();
+        foreach (Match m in ReleaseYear.Matches(torrentTitle ?? ""))
+        {
+            if (!int.TryParse(m.Value, out int titleYear) || titleYear == 1920 || named.Contains(titleYear)) continue;
+            found.Add(titleYear);
+        }
+        return found.Count == 0 || found.Contains(year);
+    }
+
     public static bool BlockedQuality(JObject r, string profileId)
     {
         string type = NormType(CardQuality.TypeLabel((string)r["Title"] ?? ""));
