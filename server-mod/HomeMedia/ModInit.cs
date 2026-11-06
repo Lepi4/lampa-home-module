@@ -2,6 +2,8 @@ using Shared;
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Shared.Models.Base;
 using Shared.Models.Events;
 using Shared.Models.Module;
@@ -40,7 +42,9 @@ public class ModInit : IModuleLoaded
                 return false;
             }
             bool publicProfileRoute = requestedPath == "/home/profiles" || requestedPath == "/home/session/bootstrap" || requestedPath == "/home/session/login" || requestedPath == "/home/session/renew" || requestedPath == "/home/admin/login" || requestedPath == "/home/admin/session" || requestedPath == "/home/session/entry";
-            bool personalRoute = requestedPath.StartsWith("/kp/") || requestedPath.StartsWith("/home/") || requestedPath.StartsWith("/anime/") || requestedPath.StartsWith("/yt/") || requestedPath.StartsWith("/local/") || requestedPath.StartsWith("/wrestling/") || requestedPath.StartsWith("/bookmark/") || requestedPath.StartsWith("/timecode/") || requestedPath.StartsWith("/storage/") || requestedPath.StartsWith("/tv/") || requestedPath.StartsWith("/ym/");
+            bool jrResults = requestedPath == "/jr/api/v2.0/indexers/all/results";
+            bool apiResults = Regex.IsMatch(requestedPath, @"^/api/v2\.0/indexers/[^/]+/results$", RegexOptions.CultureInvariant);
+            bool personalRoute = jrResults || apiResults || requestedPath.StartsWith("/kp/") || requestedPath.StartsWith("/home/") || requestedPath.StartsWith("/anime/") || requestedPath.StartsWith("/yt/") || requestedPath.StartsWith("/local/") || requestedPath.StartsWith("/wrestling/") || requestedPath.StartsWith("/bookmark/") || requestedPath.StartsWith("/timecode/") || requestedPath.StartsWith("/storage/") || requestedPath.StartsWith("/tv/") || requestedPath.StartsWith("/ym/");
             // Media URLs remain LAN streams. Profile authorization applies to catalogs, selection and native launch, not to HLS segment requests.
             bool mediaRoute=requestedPath=="/wrestling/poster.svg"||requestedPath=="/wrestling/file"||requestedPath=="/home/wallpaper"||requestedPath.StartsWith("/kp/stream")||requestedPath=="/yt/p"||requestedPath.StartsWith("/anime/play")||requestedPath.StartsWith("/local/plex/file/")||requestedPath.StartsWith("/local/plex/hls/")||requestedPath=="/local/plex/seg";
             bool discoveryRoute = requestedPath.StartsWith("/home/app-updates/") || requestedPath == "/home/health" || requestedPath == "/home/whoami" || requestedPath == "/home/hello" || requestedPath == "/home/discover" || requestedPath == "/home/seed";
@@ -127,6 +131,7 @@ public class ModInit : IModuleLoaded
         TcWatch.Start();
         if (!Profiles.IsTest) TvStore.StartKeep();
         if (!Profiles.IsTest) TvStore.StartEpgTimer();
+        _ = System.Threading.Tasks.Task.Run(() => ProfilePolicy.RunAgeQueue(System.Threading.CancellationToken.None));
         CoreInit.BaseModPathWhiteList.Add("/wrestling");
         CoreInit.BaseModPathWhiteList.Add("/kp");
         CoreInit.BaseModPathWhiteList.Add("/jr");

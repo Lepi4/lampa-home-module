@@ -10,8 +10,76 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 
 namespace HomeMedia;
+
+public static class DevicePlayback
+{
+    static readonly string[] Fields = { "auto", "max_height", "min_seeds", "hevc", "hdr" };
+
+    public static JObject Validate(JObject body)
+    {
+        if (body == null || body.Properties().Any(p => !Fields.Contains(p.Name))
+            || body["auto"]?.Type != JTokenType.Boolean
+            || body["max_height"]?.Type != JTokenType.Integer
+            || body["min_seeds"]?.Type != JTokenType.Integer)
+            throw new ArgumentException("bad_playback_payload");
+        long height = (long)body["max_height"], seeds = (long)body["min_seeds"];
+        if (height is not (0 or 720 or 1080 or 2160) || seeds < 1 || seeds > 5000)
+            throw new ArgumentException("bad_playback_range");
+        string Mode(string name)
+        {
+            string mode = body[name]?.Type == JTokenType.String ? (string)body[name] : null;
+            if (mode is not ("any" or "only" or "no")) throw new ArgumentException("bad_" + name);
+            return mode;
+        }
+        return new JObject {
+            ["schema"] = 2, ["auto"] = (bool)body["auto"], ["max_height"] = height, ["min_seeds"] = seeds,
+            ["hevc"] = Mode("hevc"), ["hdr"] = Mode("hdr")
+        };
+    }
+
+    public static JObject MigrationPlaceholder() => new JObject {
+        ["schema"] = 2, ["auto"] = false, ["max_height"] = 1080L, ["min_seeds"] = 5L,
+        ["hevc"] = "any", ["hdr"] = "no"
+    };
+
+    public static JObject FromProfileSettings(JObject settings)
+    {
+        settings ??= new JObject();
+        bool auto = (bool?)settings["torrent_auto"] == true;
+        long height = 1080;
+        if (long.TryParse((string)settings["torrent_max_height"], out long mh))
+            height = mh is 0 or 720 or 1080 or 2160 ? mh : 1080;
+        long seeds = 5;
+        if (long.TryParse((string)settings["torrent_min_seeds"], out long ms))
+            seeds = ms >= 1 && ms <= 5000 ? ms : 5;
+        bool hevcB = (bool?)settings["torrent_allow_hevc"] == true;
+        bool hdrB = (bool?)settings["torrent_allow_hdr"] == true;
+        string BoolMode(bool b) => b ? "any" : "no";
+        return new JObject {
+            ["schema"] = 2, ["auto"] = auto, ["max_height"] = height, ["min_seeds"] = seeds,
+            ["hevc"] = BoolMode(hevcB), ["hdr"] = BoolMode(hdrB)
+        };
+    }
+
+    public static int ImportForDevice(SqliteConnection c, string dev, string viewerId, JObject playback)
+    {
+        return HomeDb.Exec(c, @"UPDATE devices
+SET cfg=json_set(COALESCE(cfg,'{}'),'$.playback',json(@p))
+WHERE id=@dev
+  AND json_extract(cfg,'$.viewer')=@viewer
+  AND (
+    json_type(cfg,'$.playback') IS NULL
+    OR (
+      json_type(cfg,'$.playback')='object'
+      AND json_type(cfg,'$.playback.schema')='integer'
+      AND json_extract(cfg,'$.playback.schema') IN (0,1)
+    )
+  )", ("@p", playback.ToString(Formatting.None)), ("@dev", dev), ("@viewer", viewerId));
+    }
+}
 
 public class ProfilesController : BaseController
 {
@@ -274,6 +342,61 @@ public class ProfilesController : BaseController
         HomeDb.With(c=>Profiles.Exec(c,"INSERT INTO content_items(id,override_kind) VALUES(@k,@v) ON CONFLICT(id) DO UPDATE SET override_kind=@v,meta_rev=meta_rev+1",("@k",key),("@v",kind=="inherit"?null:kind)));
         return J(new{ok=true});
     }
+
+    [HttpGet, AllowAnonymous, Route("home/device/playback")]
+    public ActionResult GetDevicePlayback()
+    {
+        var user = Viewer();
+        if (user == null) return J(new { error = "session_required" }, 401);
+        string dev = user.Device;
+        if (!DeviceStore.ValidId(dev)) return J(new { error = "bad_dev" }, 400);
+        var rows = HomeDb.With(c => Profiles.Rows(c, "SELECT cfg FROM devices WHERE id=@d", ("@d", dev)));
+        if (rows.Count == 0) return J(new { error = "device_not_found" }, 404);
+        var cfg = JObject.Parse((string)rows[0][0] ?? "{}");
+        var play = cfg["playback"] as JObject;
+        if (play != null && (long?)play["schema"] >= 2)
+            return J(new { playback = play, migration_required = false, maxh = (string)cfg["maxh"] });
+        return J(new { playback = DevicePlayback.MigrationPlaceholder(), migration_required = true, maxh = (string)cfg["maxh"] });
+    }
+
+    [HttpPost, AllowAnonymous, Route("home/device/playback")]
+    public async Task<ActionResult> PostDevicePlayback()
+    {
+        var user = Viewer();
+        if (user == null) return J(new { error = "session_required" }, 401);
+        if (user.Child) return J(new { error = "adult_required" }, 403);
+        string dev = user.Device;
+        if (!DeviceStore.ValidId(dev)) return J(new { error = "bad_dev" }, 400);
+        JObject body;
+        try { body = DevicePlayback.Validate(await Body()); }
+        catch { return J(new { error = "bad_playback" }, 400); }
+        HomeDb.With(c => HomeDb.Exec(c, "UPDATE devices SET cfg=json_set(COALESCE(cfg,'{}'),'$.playback',json(@j)) WHERE id=@d",
+            ("@j", body.ToString(Formatting.None)), ("@d", dev)));
+        return J(new { ok = true });
+    }
+
+    [HttpPost, AllowAnonymous, Route("home/admin/import-device-playback")]
+    public async Task<ActionResult> ImportDevicePlayback()
+    {
+        if (!Admin()) return J(new { error = "admin_required" }, 403);
+        var b = await Body();
+        string dev = (string)b["device"];
+        if (!DeviceStore.ValidId(dev)) return J(new { error = "bad_dev" }, 400);
+        return HomeDb.With(c =>
+        {
+            var rows = Profiles.Rows(c, "SELECT cfg FROM devices WHERE id=@d", ("@d", dev));
+            if (rows.Count == 0) return J(new { error = "device_not_found" }, 404);
+            var cfg = JObject.Parse((string)rows[0][0] ?? "{}");
+            string viewer = (string)cfg["viewer"];
+            if (string.IsNullOrEmpty(viewer)) return J(new { error = "no_viewer" }, 400);
+            var p = Profiles.Get(viewer);
+            if (p == null || (bool)p["archived"]) return J(new { error = "unknown_profile" }, 404);
+            var playback = DevicePlayback.FromProfileSettings((JObject)p["settings"]);
+            int n = DevicePlayback.ImportForDevice(c, dev, viewer, playback);
+            return J(new { ok = true, updated = n });
+        });
+    }
+
     [HttpGet,HttpPost,AllowAnonymous,Route("home/profiles/me/settings")]
     public async Task<ActionResult> MySettings()
     {

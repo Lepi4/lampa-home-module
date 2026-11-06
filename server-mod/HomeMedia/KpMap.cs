@@ -638,8 +638,12 @@ public class KinoPubCardsController : BaseController
                 else r = await LoadPublicSource();
                 if(Profiles.Current?.Child==true)
                 {
-                    var allowed=await Task.WhenAll(r.results.Children<JObject>().Select(async card=>await ProfilePolicy.Allows(card)?card:null));
-                    r.results=new JArray(allowed.Where(c=>c!=null));
+                    var cards = r.results.Children<JObject>().Where(card => !catalogScan || Availability.HasRu(card));
+                    var kept = new List<JObject>();
+                    foreach (var card in cards)
+                        if (ProfilePolicy.Classify(card, enqueue: true) == ProfilePolicy.AgeDecision.Allow)
+                            kept.Add(card);
+                    r.results = new JArray(kept);
                 }
                 // русское название и русская озвучка (kino.pub или живая раздача); библиотеку Plex не трогаем
                 if(catalogScan)r.results=new JArray(r.results.Children<JObject>().Where(Availability.HasRu));

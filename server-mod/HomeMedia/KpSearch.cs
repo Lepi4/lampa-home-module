@@ -160,6 +160,10 @@ public class KpSearchController : BaseController
     [Route("jr/api/v2.0/indexers/all/results")]
     public async Task<ActionResult> Results()
     {
+        if (SessionRequired(out var sessionEarly))
+            return new ContentResult { Content = "{\"error\":\"session_required\"}", ContentType = "application/json; charset=utf-8", StatusCode = 401 };
+        string profileIdEarly = sessionEarly?.Id;
+
         string qs = CleanQuery(Request.QueryString.Value);
         var hosts = Hosts().Children<JObject>().Where(h => (bool?)h["enable"] != false && !string.IsNullOrEmpty((string)h["host"])).ToList();
 
@@ -179,21 +183,24 @@ public class KpSearchController : BaseController
                 string body = await http.GetStringAsync(url, cts.Token);
                 var arr = JObject.Parse(body)["Results"] as JArray ?? new JArray();
                 lock (LastStatus) LastStatus[host] = $"ok {arr.Count} за {sw.ElapsedMilliseconds} мс";
-                return arr.Children<JObject>().ToList();
+                return (ok: true, rows: arr.Children<JObject>().ToList());
             }
             catch (Exception ex)
             {
                 lock (LastStatus) LastStatus[host] = "ошибка " + ex.GetType().Name;
-                return new List<JObject>();
+                return (ok: false, rows: new List<JObject>());
             }
         }).ToList();
 
         var lists = await Task.WhenAll(tasks);
+        bool anyOk = lists.Any(x => x.ok);
+        if (hosts.Count > 0 && !anyOk)
+            return new ContentResult { Content = "{\"error\":\"search_upstream_unavailable\"}", ContentType = "application/json; charset=utf-8", StatusCode = 502 };
 
         // склейка дублей: трекеры объединяем, сидов берём максимум
         var merged = new Dictionary<string, JObject>();
         var order = new List<string>();
-        foreach (var list in lists)
+        foreach (var list in lists.Select(x => x.rows))
         {
             foreach (var r in list)
             {
@@ -216,9 +223,7 @@ public class KpSearchController : BaseController
             }
         }
 
-        if (SessionRequired(out var session))
-            return new ContentResult { Content = "{\"error\":\"session_required\"}", ContentType = "application/json; charset=utf-8", StatusCode = 401 };
-        string profileId = session?.Id;
+        string profileId = profileIdEarly;
         var results = new JArray(order.Where(k => profileId == null || !ReleasePolicy.Hide(merged[k], profileId)).Select(k => merged[k]));
         return Content(JsonConvert.SerializeObject(new { Results = results }), "application/json; charset=utf-8");
     }

@@ -55,7 +55,7 @@ public static class DeviceStore
 {
     static readonly Regex idRx = new("^[0-9A-Za-z_-]{3,40}$");
     // допустимые настройки устройства: ключ → (проверка значения)
-    public static readonly string[] Keys = { "maxh", "saver", "wall", "hidel", "auto", "engine", "buf", "font", "alpha", "afr", "kpprof", "viewer", "mc_yt", "mc_wr", "mc_ym", "mc_src", "ytprof", "mc_auto", "mc_info", "vodbuf", "mc_top", "mc_topnew", "mc_toprate", "version" };
+    public static readonly string[] Keys = { "maxh", "saver", "wall", "hidel", "auto", "engine", "buf", "font", "alpha", "afr", "kpprof", "viewer", "mc_yt", "mc_wr", "mc_ym", "mc_src", "ytprof", "mc_auto", "mc_info", "vodbuf", "mc_top", "mc_topnew", "mc_toprate", "version", "mc_clock" };
 
     public static bool ValidId(string id) => !string.IsNullOrEmpty(id) && idRx.IsMatch(id);
 
@@ -65,43 +65,43 @@ public static class DeviceStore
         {
             var q = HomeDb.Query(c, "SELECT cfg FROM devices WHERE id=@i", ("@i", dev));
             JObject cfg = q.Count > 0 ? JObject.Parse((string)q[0][0] ?? "{}") : new JObject();
-            if (q.Count == 0 && !string.IsNullOrEmpty(init))
+            JObject initObj = null;
+            if (!string.IsNullOrEmpty(init)) try { initObj = JObject.Parse(init); } catch { }
+            string ver = initObj?["version"] != null ? initObj["version"].ToString() : null;
+            if (q.Count == 0 && initObj != null)
             {
                 // новое устройство: запоминаем его текущие настройки, чтобы панель показывала реальное состояние
-                try
-                {
-                    foreach (var p in JObject.Parse(init).Properties())
-                        if (Keys.Contains(p.Name) && p.Value.Type != JTokenType.Null) cfg[p.Name] = p.Value.ToString();
-                }
-                catch { }
-            }
-            else if (q.Count > 0 && !string.IsNullOrEmpty(init))
-            {
-                try
-                {
-                    var initObj = JObject.Parse(init);
-                    if (initObj["version"] != null) cfg["version"] = initObj["version"].ToString();
-                }
-                catch { }
+                foreach (var p in initObj.Properties())
+                    if (Keys.Contains(p.Name) && p.Value.Type != JTokenType.Null) cfg[p.Name] = p.Value.ToString();
             }
             HomeDb.Exec(c, @"INSERT INTO devices(id,name,seen,cfg) VALUES(@i,@n,@s,@c)
-                             ON CONFLICT(id) DO UPDATE SET name=CASE WHEN @n<>'' THEN @n ELSE name END, seen=@s",
-                ("@i", dev), ("@n", name ?? ""), ("@s", HomeDb.Now()), ("@c", cfg.ToString(Formatting.None)));
-            return cfg;
+                             ON CONFLICT(id) DO UPDATE SET
+                             name=CASE WHEN @n<>'' THEN @n ELSE devices.name END,
+                             seen=@s,
+                             cfg=CASE WHEN @ver IS NULL THEN devices.cfg
+                                      ELSE json_set(COALESCE(devices.cfg,'{}'),'$.version',@ver) END",
+                ("@i", dev), ("@n", name ?? ""), ("@s", HomeDb.Now()), ("@c", cfg.ToString(Formatting.None)), ("@ver", string.IsNullOrEmpty(ver) ? null : ver));
+            var q2 = HomeDb.Query(c, "SELECT cfg FROM devices WHERE id=@i", ("@i", dev));
+            return q2.Count > 0 ? JObject.Parse((string)q2[0][0] ?? "{}") : cfg;
         });
     }
 
     public static void Set(string dev, string key, string value)
     {
         if (!ValidId(dev) || !Keys.Contains(key)) return;
+        if (key == "mc_clock" && value != null && value != "0" && value != "1") return;
+        if (value != null && value.Length > 200) value = value.Substring(0, 200);
+        string path = "$." + key;
         HomeDb.With(c =>
         {
-            var q = HomeDb.Query(c, "SELECT cfg FROM devices WHERE id=@i", ("@i", dev));
-            var cfg = q.Count > 0 ? JObject.Parse((string)q[0][0] ?? "{}") : new JObject();
-            if (value == null) cfg.Remove(key); else cfg[key] = value.Length > 200 ? value.Substring(0, 200) : value;
-            HomeDb.Exec(c, @"INSERT INTO devices(id,name,seen,cfg) VALUES(@i,'',@s,@c)
-                             ON CONFLICT(id) DO UPDATE SET cfg=@c",
-                ("@i", dev), ("@s", HomeDb.Now()), ("@c", cfg.ToString(Formatting.None)));
+            HomeDb.Exec(c, "INSERT INTO devices(id,name,seen,cfg) VALUES(@i,'',@s,'{}') ON CONFLICT(id) DO NOTHING",
+                ("@i", dev), ("@s", HomeDb.Now()));
+            if (value == null)
+                HomeDb.Exec(c, "UPDATE devices SET cfg=json_remove(COALESCE(cfg,'{}'), @p) WHERE id=@i",
+                    ("@p", path), ("@i", dev));
+            else
+                HomeDb.Exec(c, "UPDATE devices SET cfg=json_set(COALESCE(cfg,'{}'), @p, @v) WHERE id=@i",
+                    ("@p", path), ("@v", value), ("@i", dev));
         });
     }
 
@@ -113,9 +113,11 @@ public static class DeviceStore
         {
             var rows = HomeDb.Query(c, "SELECT cfg FROM devices WHERE id=@i", ("@i", dev));
             if (rows.Count == 0) return false;
-            var cfg = JObject.Parse((string)rows[0][0] ?? "{}");
-            if (string.IsNullOrEmpty(name)) cfg.Remove("display_name"); else cfg["display_name"] = name;
-            HomeDb.Exec(c, "UPDATE devices SET cfg=@c WHERE id=@i", ("@i", dev), ("@c", cfg.ToString(Formatting.None)));
+            if (string.IsNullOrEmpty(name))
+                HomeDb.Exec(c, "UPDATE devices SET cfg=json_remove(COALESCE(cfg,'{}'), '$.display_name') WHERE id=@i", ("@i", dev));
+            else
+                HomeDb.Exec(c, "UPDATE devices SET cfg=json_set(COALESCE(cfg,'{}'), '$.display_name', @v) WHERE id=@i",
+                    ("@v", name.Length > 200 ? name.Substring(0, 200) : name), ("@i", dev));
             return true;
         });
     }

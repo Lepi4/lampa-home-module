@@ -98,6 +98,15 @@ function init(){
  if(profile.is_child){var originalSet=Lampa.Storage.set;Lampa.Storage.set=function(k,v){if(k==='source')v='tmdb';return originalSet.call(this,k,v);};Lampa.Storage.set('source','tmdb');}
 
  var cfg=profile.settings||{}, allowSubtitlesOnly=cfg.allow_subtitles_only===true, feedBlock=cfg.feed_block_quality||[], generation=0, pendingAuto=null, pendingRetry=null, manualUntil=0, autoTimer=null, autoPlaybackPending=false;
+ var devicePlayback=null,deviceMaxh=null;
+ function heightLimit(hardware,chosen){var caps=[hardware,chosen].filter(function(v){return v!==null&&v!==undefined&&v!=='';}).map(Number).filter(function(v){return isFinite(v)&&v>0;});return caps.length?Math.min.apply(Math,caps):0;}
+ function modeAllows(mode,present){if(mode==='any')return true;if(typeof present!=='boolean')return false;if(mode==='only')return present;if(mode==='no')return !present;return false;}
+ function applyDeviceMaxhFromStorage(){try{var dev=Lampa.Storage.get('device');if(dev){var o=typeof dev==='string'?JSON.parse(dev):dev;deviceMaxh=o.torrents&&o.torrents.handle;}}catch(e){}}
+ $.ajax({url:owner.server_base+'/home/device/playback',dataType:'json',timeout:12000,success:function(d){
+   if(d&&d.playback)devicePlayback=d.playback;
+   if(d&&d.maxh!=null&&d.maxh!=='')deviceMaxh=+d.maxh||0;
+   else applyDeviceMaxhFromStorage();
+ },error:applyDeviceMaxhFromStorage});
  function cancelAuto(){generation++;pendingAuto=null;pendingRetry=null;autoPlaybackPending=false;clearTimeout(autoTimer);}
  Lampa.Activity.listener.follow('popstate',cancelAuto);Lampa.Listener.follow('activity',function(e){if(e.type==='init')cancelAuto();});
  if(Lampa.Player&&Lampa.Player.play){var originalPlay=Lampa.Player.play;
@@ -130,15 +139,21 @@ function init(){
    if(year&&alien.length&&years.indexOf(year)<0)return false;
    return true;
  }
- function codecMode(v, fallback){if(v==='any'||v==='only'||v==='no')return v;if(v===false)return 'no';if(v===true)return 'any';return fallback;}
- function allows(mode, hit){if(mode==='any')return true;return mode==='only'?hit:!hit;}
- function eligible(e){var title=e.Title||e.title||'',h=/2160|4k|uhd/i.test(title)?2160:/1080/i.test(title)?1080:/720/i.test(title)?720:/480|576/i.test(title)?480:0;
-   var hevc=/hevc|h[ .]?265|x265/i.test(title),hdr=/(?:^|[^a-z0-9])hdr(?:10)?\+?(?![a-z])/i.test(title)||/dolby[ .]?vision|\bdv\b/i.test(title);
+ function eligible(e){
+   var play=devicePlayback;
+   if(!play||play.schema!==2)return false;
+   var h=resolution(e),seeds=+(e.Seeders!=null?e.Seeders:e.Seeds||0);
+   var cap=heightLimit(deviceMaxh,play.max_height);
+   if(!(h>0)||!isFinite(seeds)||seeds<play.min_seeds)return false;
+   if(cap>0&&h>cap)return false;
+   var title=e.Title||e.title||'';
+   var hevc=/hevc|h[ .]?265|x265/i.test(title);
+   var hdr=/(?:^|[^a-z0-9])hdr(?:10)?\+?(?![a-z])/i.test(title)||/dolby[ .]?vision|\bdv\b/i.test(title);
    var subsOnly=/\bСТ\b|\[СТ\]|\bSub\b|\bSUB\b|субтитр/i.test(title)&&!/Дубл|дубл|MVO|DVO|AVO|озвуч|Озвуч|Многоголос|Закадров|\bDUB\b|\bRUS\b|\bрус/i.test(title);
    if(subsOnly&&!allowSubtitlesOnly)return false;
-   return h>0&&h<=(+cfg.torrent_max_height||1080)&&+(e.Seeders!=null?e.Seeders:e.Seeds||0)>=(+cfg.torrent_min_seeds||5)&&allows(codecMode(cfg.torrent_allow_hevc,'any'),hevc)&&allows(codecMode(cfg.torrent_allow_hdr,'no'),hdr);
+   return modeAllows(play.hevc,hevc)&&modeAllows(play.hdr,hdr);
  }
- Lampa.Activity.push=function(object){if(!cfg.torrent_auto||object.component!=='torrents'||Date.now()<manualUntil)return push.apply(this,arguments);
+ Lampa.Activity.push=function(object){if(!devicePlayback||devicePlayback.schema!==2||!devicePlayback.auto||object.component!=='torrents'||Date.now()<manualUntil)return push.apply(this,arguments);
    var movie=object.movie;if(!movie||!Lampa.Parser||!Lampa.Torserver)return manual(object);var own=++generation,active=Lampa.Activity.active();
    function fallback(){if(own!==generation||Lampa.Activity.active()!==active)return;manual(object);}
    clearTimeout(autoTimer);autoTimer=setTimeout(fallback,35000);
@@ -163,7 +178,7 @@ function init(){
    var movie=e.data&&e.data.movie;if(movie&&movie.id)$.getJSON(owner.server_base+'/home/content-kind?media='+(movie.name?'tv':'movie')+'&id='+movie.id,function(d){if(d.kind)movie.home_kind=d.kind;});
    try{var render=e.object.activity.render();render.find('.view--torrent').off('hover:long.homeProfiles').on('hover:long.homeProfiles',function(){manualUntil=Date.now()+3000;$(this).trigger('hover:enter');return false;});}catch(x){}});
  // Holding the torrent entry in the source menu opens classic release selection, rather than changing priority.
- var show=Lampa.Select.show;Lampa.Select.show=function(p){if(cfg.torrent_auto&&p&&p.items){var long=p.onLong;p.onLong=function(it){if(it.btn&&$(it.btn).is('.view--torrent')){manualUntil=Date.now()+3000;return p.onSelect(it);}return long&&long.apply(this,arguments);};}return show.apply(this,arguments);};
+ var show=Lampa.Select.show;Lampa.Select.show=function(p){if(devicePlayback&&devicePlayback.schema===2&&devicePlayback.auto&&p&&p.items){var long=p.onLong;p.onLong=function(it){if(it.btn&&$(it.btn).is('.view--torrent')){manualUntil=Date.now()+3000;return p.onSelect(it);}return long&&long.apply(this,arguments);};}return show.apply(this,arguments);};
 }
 
 })();

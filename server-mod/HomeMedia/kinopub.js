@@ -1060,6 +1060,8 @@
     var comp = new Lampa.InteractionCategory(object);
     var sectionEnded=false, shown=0, pumps=0, pumping=false, busy=false, destroyed=false;
     var cards=[], focused=-1, seen=Object.create(null), nextPage=1, retryTimer=null, failures=0, built=false;
+    var ageTries=0, ageTimer=null;
+    var ageWait=[2000,4000,8000,8000];
     var originalDestroy=comp.destroy;
     // InteractionCategory increments page before the request and keeps its cards private.
     // Own the cursor: only a successful response advances it, appending never rebuilds the grid.
@@ -1067,6 +1069,7 @@
     comp.destroy=function(){
       destroyed=true;
       if(retryTimer!==null)clearTimeout(retryTimer);
+      if(ageTimer!==null){clearTimeout(ageTimer);ageTimer=null;}
       cards=[];
       return originalDestroy.apply(comp,arguments);
     };
@@ -1101,7 +1104,7 @@
         if(!stopLogged||stopLogged!==why){ stopLogged=why; catLog('cat_stop', why+' shown='+shown+' pumps='+pumps); }
         return;
       }
-      if(pumping||busy||retryTimer!==null)return;
+      if(pumping||busy||retryTimer!==null||ageTimer!==null)return;
       pumping=true; pumps++;
       setTimeout(function(){ pumping=false; if(!destroyed&&!sectionEnded)comp.next(); }, 40);
     }
@@ -1113,14 +1116,27 @@
       if(failures===1)Lampa.Noty.show('Не удалось загрузить следующую страницу. Повторяем…');
       retryTimer=setTimeout(function(){retryTimer=null;loadPage();},Math.min(15000,1000*Math.pow(2,Math.min(failures-1,4))));
     }
+    function retryAge(){
+      if(destroyed)return;
+      if(ageTries>=ageWait.length){
+        try{comp.activity.loader(false);}catch(e){}
+        Lampa.Noty.show('Возраст ещё проверяется');
+        return;
+      }
+      var wait=ageWait[ageTries++];
+      ageTimer=setTimeout(function(){ageTimer=null;loadPage();},wait);
+    }
     function loadPage(){
-      if(destroyed||sectionEnded||busy||retryTimer!==null)return;
+      if(destroyed||sectionEnded||busy||retryTimer!==null||ageTimer!==null)return;
       busy=true;
       var requested=nextPage;
       fetchItems(object.kp,requested,function(res){
         if(destroyed)return;
-        if(res.retry_page===true){retry();return;}
-        busy=false;failures=0;
+        if(res.retry_page===true){
+          busy=false;failures=0;retryAge();
+          return;
+        }
+        busy=false;failures=0;ageTries=0;
         object.page=requested;nextPage=requested+1;
         res=sectionPage(res);
         if(!built){if(res.results.length||sectionEnded){comp.build(res);built=true;}}

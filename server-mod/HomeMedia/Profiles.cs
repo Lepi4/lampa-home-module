@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS release_episodes(profile_id TEXT NOT NULL,media TEXT 
         try{Exec(c,"ALTER TABLE release_episodes ADD COLUMN best_tier INTEGER NOT NULL DEFAULT -1");}catch{}
         try{Exec(c,"ALTER TABLE release_episodes ADD COLUMN best_type TEXT NOT NULL DEFAULT ''");}catch{}
         try{Exec(c,"ALTER TABLE release_episodes ADD COLUMN seeders INTEGER NOT NULL DEFAULT 0");}catch{}
+        ProfilePolicy.EnsureAgeColumns(c);
         Exec(c,"INSERT OR IGNORE INTO user_profiles(id,name,is_admin) VALUES(@id,@name,1)",("@id",MainId),("@name","Основной"));
         Exec(c,"INSERT OR IGNORE INTO kv(k,v) VALUES('user_default_profile',@id)",("@id",MainId));
         Exec(c,"INSERT OR IGNORE INTO kv(k,v) VALUES('user_cloud_import_profile',@id)",("@id",MainId));

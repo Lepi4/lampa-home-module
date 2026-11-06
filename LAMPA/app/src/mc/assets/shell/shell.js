@@ -50,12 +50,30 @@
     return false;
   }
   function autoTorrentSettings() {
-    api('/home/profiles/me/settings',function(d){var cfg=d.settings||{};
-      function save(){writeApi('/home/profiles/me/settings',cfg,function(r){if(r.error){toast(r.error);return;}try{userContext=JSON.parse(MC.profileRefresh());}catch(e){}try{if(MC.reloadLampa)MC.reloadLampa();}catch(e){}paint();});}
-      function mode(v, fallback){if(v==='any'||v==='only'||v==='no')return v;if(v===false)return 'no';if(v===true)return 'any';return fallback;}
-      function label(v){return v==='only'?'только':v==='no'?'нет':'любое';}
-      function next(v){return v==='any'?'only':v==='only'?'no':'any';}
-      function paint(){var hevc=mode(cfg.torrent_allow_hevc,'any'),hdr=mode(cfg.torrent_allow_hdr,'no');menuShow('Торренты: '+userContext.profile.name,[['Автовыбор: '+(cfg.torrent_auto?'включён':'выключен'),null,function(){cfg.torrent_auto=!cfg.torrent_auto;save();}],['Разрешение: до '+(cfg.torrent_max_height||1080)+'p',null,function(){var a=[720,1080,2160],i=a.indexOf(+cfg.torrent_max_height||1080);cfg.torrent_max_height=a[(i+1)%a.length];save();}],['Минимум сидов: '+(cfg.torrent_min_seeds||5),null,function(){var a=[3,5,10,20],i=a.indexOf(+cfg.torrent_min_seeds||5);cfg.torrent_min_seeds=a[(i+1)%a.length];save();}],['HEVC: '+label(hevc),null,function(){cfg.torrent_allow_hevc=next(hevc);save();}],['HDR: '+label(hdr),null,function(){cfg.torrent_allow_hdr=next(hdr);save();}],['Назад',null,openSettings]]);}
+    api('/home/device/playback', function (d) {
+      if (d.error) { toast(d.error); return; }
+      var play = d.playback || {};
+      function save(obj) {
+        writeApi('/home/device/playback', obj, function (r) {
+          if (r.error) { toast(r.error); return; }
+          play = obj;
+          paint();
+        });
+      }
+      function label(v) { return v === 'only' ? 'только' : v === 'no' ? 'нет' : 'любое'; }
+      function nextMode(v) { return v === 'any' ? 'only' : v === 'only' ? 'no' : 'any'; }
+      function paint() {
+        var auto = play.auto === true, mh = +play.max_height || 1080, seeds = +play.min_seeds || 5;
+        var hevc = play.hevc || 'any', hdr = play.hdr || 'no';
+        menuShow('Торренты: ' + userContext.profile.name, [
+          ['Автовыбор: ' + (auto ? 'включён' : 'выключен'), null, function () { play.auto = !auto; save(play); }],
+          ['Разрешение: до ' + mh + 'p', null, function () { var a = [0, 720, 1080, 2160], i = a.indexOf(mh); play.max_height = a[(i + 1) % a.length]; save(play); }],
+          ['Минимум сидов: ' + seeds, null, function () { var a = [3, 5, 10, 20], i = a.indexOf(seeds); play.min_seeds = a[(Math.max(0, i) + 1) % a.length]; save(play); }],
+          ['HEVC: ' + label(hevc), null, function () { play.hevc = nextMode(hevc); save(play); }],
+          ['HDR: ' + label(hdr), null, function () { play.hdr = nextMode(hdr); save(play); }],
+          ['Назад', null, openSettings]
+        ]);
+      }
       paint();
     });
   }
@@ -140,8 +158,25 @@
   }
 
   // ---------- часы ----------
-  function tick() { var d = new Date(); $('clock').textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
-  setInterval(tick, 10000); tick();
+  function clockCacheKey() { return 'home_device_cfg_v2|' + MC.server() + '|' + MC.deviceId() + '|mc_clock'; }
+  var clockTimer = null;
+  function applyClock() {
+    var clock = $('clock');
+    if (!clock) return;
+    var cached = '';
+    try { cached = localStorage.getItem(clockCacheKey()) || ''; } catch (e) {}
+    var raw = (state.dev || {}).mc_clock;
+    var show = String(raw == null ? (cached === '0' ? '0' : '1') : raw) !== '0';
+    clock.style.display = show ? '' : 'none';
+    if (!show) { if (clockTimer !== null) clearInterval(clockTimer); clockTimer = null; return; }
+    function paint() {
+      var d = new Date();
+      clock.textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+    }
+    paint();
+    if (clockTimer === null) clockTimer = setInterval(paint, 10000);
+  }
+  try { applyClock(); } catch (e) {}
   // остаток подписки Кинопаба: нет аккаунта — не показываем; 0 дней — «истекла»
   function dayWord(n) { var m = n % 10, h = n % 100; return (h > 10 && h < 20) ? 'дней' : m === 1 ? 'день' : (m >= 2 && m <= 4) ? 'дня' : 'дней'; }
   function loadSub() {
@@ -890,6 +925,7 @@
 
   function loadRows(fresh) {
     var cfg = state.cfg || [];
+    cfg.forEach(function (r) { r._emptyTries = 0; });
     var queue = cfg.slice(), active = 0;
     var gen = state.gen = (state.gen || 0) + 1;       // поколение запроса: ответ устаревшего запуска не затирает более новый
     var sv = String(state.server || ''), pf = String(state.profile || '');     // сервер и профиль запуска: результат ложится в кэш того, для кого запрошен
@@ -905,7 +941,14 @@
               var more = d.has_more === true;
               if (!all.length && more) {
                 r._emptyTries = (r._emptyTries || 0) + 1;
-                if (r._emptyTries <= 2) { queue.unshift(r); next(); return; }
+                if (r._emptyTries <= 4) {
+                  var wait = [2000, 4000, 8000, 8000][r._emptyTries - 1];
+                  setTimeout(function () {
+                    if (gen !== state.gen) return;
+                    queue.push(r);
+                    next();
+                  }, wait);
+                }
                 return;
               }
               r._emptyTries = 0;
@@ -932,7 +975,8 @@
     rebuildNav(); setFocus(state.nav.length > 1 ? 1 : 0, 0, true);
     var dev = MC.deviceId();
     api('/home/shell/config?dev=' + encodeURIComponent(dev) + '&profile=' + encodeURIComponent(state.profile), function (c) {
-      state.dev = c.dev || {}; save('mc_dev', state.dev); syncAfr(); applyWall(); inheritWall();
+      state.dev = c.dev || {}; save('mc_dev', state.dev); try { localStorage.setItem(clockCacheKey(), String((state.dev || {}).mc_clock != null ? state.dev.mc_clock : '1')); } catch (e) {}
+      syncAfr(); applyWall(); inheritWall(); applyClock();
       state.sources=c.sources||{};state.allRows=c.all_rows||c.rows||[];
       refreshMyChannels();
       var rows = (c.rows || []).map(function (r) { return { id: r.id, title: r.title, style: r.style, url: r.url }; });
@@ -968,10 +1012,13 @@
     });
   }
   function devSet(k, v, cb) {
+    var prev = JSON.parse(JSON.stringify(state.dev || {}));
     state.dev = state.dev || {}; if (v === '' || v == null) delete state.dev[k]; else state.dev[k] = String(v);
     save('mc_dev', state.dev);
     if (k === 'afr') syncAfr();
-    api('/home/dev/set?dev=' + encodeURIComponent(MC.deviceId()) + '&k=' + encodeURIComponent(k) + (v === '' || v == null ? '' : '&v=' + encodeURIComponent(v)), function () { if (cb) cb(); }, function () { toast('Не удалось сохранить на сервере'); });
+    api('/home/dev/set?dev=' + encodeURIComponent(MC.deviceId()) + '&k=' + encodeURIComponent(k) + (v === '' || v == null ? '' : '&v=' + encodeURIComponent(v)), function () { if (cb) cb(); }, function () {
+      state.dev = prev; save('mc_dev', state.dev); applyClock(); toast('Не удалось сохранить на сервере');
+    });
   }
   function syncAfr() { try { if(MC.syncAfrPending)MC.syncAfrPending();if (MC.setAfrMode && state.dev && state.dev.afr != null) MC.setAfrMode(String(state.dev.afr) !== '0'); } catch (e) {} }
   var OPT = {
@@ -989,6 +1036,7 @@
     mc_toprate: { t: 'Лучшие новинки: рейтинг от', d: '7.9', o: [['7.0', '7.0'], ['7.5', '7.5'], ['7.9', '7.9'], ['8.2', '8.2'], ['8.5', '8.5']], hint: 'у российского производства порог на 0,9 ниже' },
     mc_yt: { t: 'Ряд YouTube', d: '1', o: [['1', 'показывать'], ['0', 'скрыть']] },
     mc_info: { t: 'Описание под постером', d: '1', o: [['1', 'показывать'], ['0', 'скрыть']], hint: 'название, год, жанры, сюжет выбранной карточки' },
+    mc_clock: { t: 'Часы лаунчера', d: '1', o: [['1', 'показывать'], ['0', 'скрыть']] },
     saver: { t: 'Заставка Lampa', d: '0', o: [['0', 'выключена'], ['1', 'включена']] }
   };
   function optIndex(key, list) { var v = String((state.dev || {})[key] != null ? state.dev[key] : OPT[key] && OPT[key].d); for (var i = 0; i < list.length; i++) if (list[i][0] === v) return i; return 0; }
@@ -1093,6 +1141,7 @@
       });
     });
     group('Главный экран');
+    opt('mc_clock', applyClock);
     opt('mc_info', function () { showInfo(null); });
     opt('mc_ym', function () { buildApps(); rebuildNav(); });
     opt('mc_top', function () { state.lastLoad = 0; });

@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Xml;
@@ -34,6 +35,7 @@ public static class TvStore
     public class Prog { public long S, E; public string T, D; }
 
     static List<Chan> channels = new();
+    static readonly object channelsLock = new();
     static DateTime channelsAt = DateTime.MinValue;
     static Dictionary<string, List<Prog>> epg = new();
     public static DateTime EpgAt = DateTime.MinValue;
@@ -155,16 +157,30 @@ public static class TvStore
         });
     }
 
-    public static async Task<List<Chan>> Channels(bool force = false)
+    static async Task<List<Chan>> LoadPlaylist()
     {
-        if (!force && channels.Count > 0 && DateTime.UtcNow - channelsAt < TimeSpan.FromMinutes(5)) return channels;
         string b = BaseUrl;
-        if (string.IsNullOrEmpty(b)) return channels;
+        if (string.IsNullOrEmpty(b))
+        {
+            lock (channelsLock)
+                return channels;
+        }
         string text = await http.GetStringAsync(b + "/playlist.m3u8");
         var list = ParsePlaylist(text);
-        channels = list;
-        channelsAt = DateTime.UtcNow;
+        lock (channelsLock)
+        {
+            channels = list;
+            channelsAt = DateTime.UtcNow;
+        }
         return list;
+    }
+
+    public static async Task<List<Chan>> Channels()
+    {
+        lock (channelsLock)
+            if (channels.Count > 0 && DateTime.UtcNow - channelsAt < TimeSpan.FromMinutes(5))
+                return channels;
+        return await LoadPlaylist();
     }
 
     public static List<Chan> ParsePlaylist(string text)
@@ -557,7 +573,7 @@ public class TvGuideController : BaseController
         TvStore.SaveConfig(cfg);
         try
         {
-            var ch = await TvStore.Channels(true);
+            var ch = await TvStore.Channels();
             return Json(new { ok = true, url = (string)cfg["url"], channels = ch.Count });
         }
         catch (Exception ex) { return Json(new { ok = false, url = (string)cfg["url"], error = ex.GetType().Name + ": " + ex.Message }); }
@@ -598,8 +614,8 @@ public class TvGuideController : BaseController
     [Route("tv/refresh")]
     public async Task<ActionResult> Refresh()
     {
-        try { await TvStore.Channels(true); } catch { }
         TvStore.ForceRefresh();
+        try { await TvStore.Channels(); } catch { }
         return Json(new { ok = true });
     }
 

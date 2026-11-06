@@ -71,7 +71,7 @@ WHERE profile_id=@profile AND rev>hidden_rev ORDER BY at DESC,identity DESC"))
                 var match=Regex.Match(card,@"^(\d+)_(tv|movie)$");
                 if(match.Success)value=await KpMap.TmdbCard(match.Groups[2].Value,long.Parse(match.Groups[1].Value));
             }
-            if(value==null||!await ProfilePolicy.Allows(value))continue;
+            if(value==null||ProfilePolicy.Classify(value,enqueue:true)!=ProfilePolicy.AgeDecision.Allow)continue;
             kept++;
             if(kept<=skip)continue;
             if(cards.Count>=limit){more=true;break;}

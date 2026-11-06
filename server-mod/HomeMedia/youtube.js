@@ -251,8 +251,9 @@
     var feed = object.yt && object.yt.mode === 'feed';
     var feedEnded=false,shown=0,pumping=false,busy=false,destroyed=false,built=false;
     var cards=[],focused=-1,nextPage=1,seen=Object.create(null),retryTimer=null,failures=0,request=null,pumpTimer=null;
+    var ageTries=0,ageTimer=null,ageWait=[2000,4000,8000,8000];
     var originalDestroy=comp.destroy;
-    comp.destroy=function(){destroyed=true;clearTimeout(retryTimer);clearTimeout(pumpTimer);if(request&&request.abort)request.abort();cards=[];return originalDestroy&&originalDestroy.apply(comp,arguments);};
+    comp.destroy=function(){destroyed=true;clearTimeout(retryTimer);clearTimeout(pumpTimer);if(ageTimer!==null){clearTimeout(ageTimer);ageTimer=null;}if(request&&request.abort)request.abort();cards=[];return originalDestroy&&originalDestroy.apply(comp,arguments);};
     // The core's 12-card window is too small for five wide thumbnails per row.
     // Keep navigation and rendered layers around the actual focused card.
     var nativeLimit=comp.limit;
@@ -277,19 +278,30 @@
     }
 
     function pump() {
-      if(destroyed||feedEnded||pumping||busy||retryTimer!==null)return;
+      if(destroyed||feedEnded||pumping||busy||retryTimer!==null||ageTimer!==null)return;
       if(shown>=36&&!(focused>=0&&cards.length-focused<=12))return;
       pumping=true;pumpTimer=setTimeout(function(){pumping=false;if(!destroyed)comp.next();},40);
     }
     function retry(){busy=false;if(destroyed)return;if(++failures===1)noty('YouTube: повторяем загрузку страницы…');retryTimer=setTimeout(function(){retryTimer=null;comp.next();},Math.min(15000,1000*Math.pow(2,Math.min(failures-1,4))));}
+    function retryAge(){
+      busy=false;
+      if(destroyed)return;
+      if(ageTries>=ageWait.length){
+        try{comp.activity.loader(false);}catch(e){}
+        noty('Возраст ещё проверяется');
+        return;
+      }
+      var wait=ageWait[ageTries++];
+      ageTimer=setTimeout(function(){ageTimer=null;comp.next();},wait);
+    }
     comp.create=function(){this.activity.loader(true);this.next();};
     comp.next=function(){
-      if(destroyed||feedEnded||busy||retryTimer!==null)return;
+      if(destroyed||feedEnded||busy||retryTimer!==null||ageTimer!==null)return;
       busy=true;var pg=nextPage;
       request=load(pg,function(res){
         if(destroyed)return;
-        if(res.retry_page===true){retry();return;}
-        busy=false;failures=0;object.page=pg;nextPage=pg+1;feedEnded=!res.has_more;
+        if(res.retry_page===true){failures=0;retryAge();return;}
+        busy=false;failures=0;ageTries=0;object.page=pg;nextPage=pg+1;feedEnded=!res.has_more;
         res.results=res.results.filter(function(c){var id=String(c.id||c.yt_id||c.yt_ch);if(seen[id])return false;seen[id]=true;return true;});
         shown+=res.results.length;res.total_pages=feedEnded?pg:Math.max(500,pg+1);
         if(!built){if(res.results.length||feedEnded){comp.build(res);built=true;try{comp.render().addClass(object.yt.mode==='subs'?'yt-sq':'yt-wide');}catch(e){}}}
