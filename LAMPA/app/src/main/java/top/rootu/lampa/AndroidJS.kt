@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONException
 import org.json.JSONObject
+import java.net.URI
 import java.util.Locale
 import top.rootu.lampa.browser.Browser
 import top.rootu.lampa.channels.LampaChannels
@@ -771,7 +772,27 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
         return store.all.toString()
     }
 
+    private fun attachHomeSession(url: String, headers: JSONObject) {
+        val server = MainActivity.LAMPA_URL.trim().trimEnd('/')
+        if (server.isEmpty()) return
+        val request = try { URI(url.trim()) } catch (_: Exception) { return }
+        val home = try { URI(server) } catch (_: Exception) { return }
+        if (request.host.isNullOrEmpty() || home.host.isNullOrEmpty()) return
+        if (!request.scheme.equals(home.scheme, ignoreCase = true)) return
+        if (!request.host.equals(home.host, ignoreCase = true)) return
+        fun portOf(uri: URI): Int = when {
+            uri.port != -1 -> uri.port
+            uri.scheme.equals("https", ignoreCase = true) -> 443
+            else -> 80
+        }
+        if (portOf(request) != portOf(home)) return
+        val token = ProfileRuntime.ownerFor(server)?.optString("token").orEmpty()
+        if (token.isBlank()) return
+        headers.putIfAbsentIgnoreCase("X-Home-Session", token)
+    }
+
     private fun injectLampaClientHeaders(url: String, headers: JSONObject) {
+        attachHomeSession(url, headers)
         if (!AppAttestation.shouldInjectClientHeaders(url, MainActivity.LAMPA_URL)) return
 
         AppAttestation.buildClientHeaders(mainActivity).forEach { (key, value) ->

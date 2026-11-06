@@ -1356,19 +1356,6 @@
       }, 700);
     });
   } catch (e) {}
-  // Прокси поиска торрентов (/home/jr) больше не нужен: украинские раздачи фильтрует сам JacRed. Возвращаем прямой адрес сервера, если он был подменён
-  (function jrBack() {
-    try {
-      var cur = String(Lampa.Storage.get('jackett_url', '') || '');
-      if (/\/home\/jr\/?$/.test(cur)) Lampa.Storage.set('jackett_url', cur.replace(/\/home\/jr\/?$/, ''));
-    } catch (e) {}
-  })();
-  setTimeout(function () {
-    try {
-      var cur = String(Lampa.Storage.get('jackett_url', '') || '');
-      if (/\/home\/jr\/?$/.test(cur)) Lampa.Storage.set('jackett_url', cur.replace(/\/home\/jr\/?$/, ''));
-    } catch (e) {}
-  }, 4000);
   setTimeout(applyLook, 2500);
   setInterval(applyLook, 60000);
 

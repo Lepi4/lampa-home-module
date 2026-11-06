@@ -487,24 +487,47 @@
   }
   function tile(title, sub, act) { var t = el('div', 'tile', title); if (sub) t.appendChild(el('small', null, sub)); t._act = act; return t; }
 
-  function setupFind() {
+  function adoptServer(url) {
+    getJson(url + '/home/whoami', function (w) {
+      var list = w.profiles || [], saved = load('mc_profile', '');
+      var chosen = saved && list.filter(function (pr) { return pr.id === saved; })[0];
+      if (!chosen) {
+        var auth = list.filter(function (pr) { return pr.authorized; });
+        chosen = auth.length === 1 ? auth[0] : (list.filter(function (pr) { return pr.id === 'main'; })[0] || list[0]);
+      }
+      setupFinish(url, chosen ? chosen.id : 'main', chosen && chosen.maxh ? chosen.maxh : 1080);
+    }, function () { setupFinish(url, load('mc_profile', '') || 'main', 1080); });
+  }
+
+  function setupFind(ask) {
     var box = $('setup'); box.innerHTML = '';
     box.appendChild(el('h1', null, 'Lampa Media Center'));
     var p = el('p', null, 'Ищу сервер в локальной сети…'); box.appendChild(p);
     var list = el('div', 'list'); box.appendChild(list);
     setupShow(true);
     var found = [];
-    var manual = tile('Ввести адрес вручную', null, function () { setupManual(); });
-    list.appendChild(manual); setupItems([manual]);
+    function showChoices() {
+      list.innerHTML = '';
+      var items = [];
+      found.forEach(function (o) {
+        var t = tile(o.name || 'Lampa Media Center', o.url, function () { if (ask) setupProfile(o.url); else adoptServer(o.url); });
+        list.appendChild(t); items.push(t);
+      });
+      var manual = tile('Ввести адрес вручную', null, function () { setupManual(); });
+      list.appendChild(manual); items.push(manual);
+      setupItems(items);
+    }
+    if (ask) showChoices();
     window.__mc.onFound = function (o) {
       found.push(o);
-      p.textContent = 'Найден сервер. Выберите:';
-      var t = tile(o.name || 'Lampa Media Center', o.url, function () { setupProfile(o.url); });
-      list.insertBefore(t, list.firstChild);
-      setupItems([].slice.call(list.children));
+      if (ask) { p.textContent = 'Найден сервер. Выберите:'; showChoices(); }
+      else p.textContent = found.length === 1 ? 'Сервер найден, подключаюсь…' : 'Найдено серверов: ' + found.length;
     };
-    window.__mc.onScanDone = function (n) {
+    window.__mc.onScanDone = function () {
+      if (!ask && found.length === 1) { adoptServer(found[0].url); return; }
       if (!found.length) p.textContent = 'Сервер не найден. Введите адрес вручную (например http://192.168.1.80:9118).';
+      else p.textContent = 'Найден сервер. Выберите:';
+      showChoices();
     };
     var hints = []; var last = MC.server(); if (last) hints.push(last);
     MC.discover(JSON.stringify(hints));
@@ -1169,7 +1192,7 @@
         ['Отмена', null, menuClose]
       ]);
     });
-    row('Сервер и профиль воспроизведения', MC.server(), function () { return '›'; }, null, function () { state.firstRun = false; setupFind(); });
+    row('Сервер и профиль воспроизведения', MC.server(), function () { return '›'; }, null, function () { state.firstRun = false; setupFind(true); });
     var close = tile('Закрыть', null, function () { setupShow(false); rebuildNav(); if (Date.now() - state.lastLoad > 1500) { state.lastLoad = Date.now(); startHome(false); } });
     box.appendChild(close); items.push(close);
     setupShow(true); setupItems(items);
@@ -1404,6 +1427,8 @@
   };
 
   // ---------- старт ----------
-  if (!MC.server() || !load('mc_setup', '')) { state.firstRun = true; setupFind(); }
-  else startHome(false);
+  if (MC.server()) {
+    if (!load('mc_setup', '')) save('mc_setup', '1');
+    startHome(false);
+  } else { state.firstRun = true; setupFind(false); }
 })();
