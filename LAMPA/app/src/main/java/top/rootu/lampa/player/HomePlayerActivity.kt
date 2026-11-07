@@ -1533,7 +1533,7 @@ class HomePlayerActivity : Activity() {
             var bmp: android.graphics.Bitmap? = null
             try {
                 // переходы вручную: адреса логотипов часто http, а сервер переводит на https (301)
-                var cur = url
+                var cur = url!!
                 for (hop in 0 until 5) {
                     val c = openLogo(cur)
                     c.connectTimeout = 6000; c.readTimeout = 8000

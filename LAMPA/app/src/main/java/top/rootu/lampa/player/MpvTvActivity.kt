@@ -623,7 +623,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
             var bmp: Bitmap? = null
             try {
                 // переходы вручную: адреса логотипов часто http, а сервер переводит на https (301)
-                var curUrl = url
+                var curUrl = url!!
                 for (hop in 0 until 5) {
                     val c = openLogo(curUrl)
                     c.connectTimeout = 6000; c.readTimeout = 8000
