@@ -9,8 +9,8 @@ body{margin:0;height:100vh;overflow:hidden;color:#fff;font-family:Roboto,Arial,s
 #brand{font-size:1.9rem;font-weight:700;letter-spacing:.02em;color:#f9a825}
 #bar{display:flex;gap:.8rem;flex:1}
 #clock{font-size:2.2rem;font-weight:500}
-#sub{font-size:1.3rem;padding:.35rem .9rem;border-radius:1rem;background:rgba(255,255,255,.12);display:none}
-#sub.low{background:#c62828;color:#fff}
+#bar #sub{display:none;align-items:center;gap:.45rem;font-size:1.2rem;font-weight:600;padding:.35rem 1rem;border-radius:.7rem;background:rgba(255,255,255,.12);flex:none}
+#bar #sub b{font-size:1.9rem;font-weight:800;line-height:1}
 #scroll{flex:1;overflow:hidden;position:relative}
 #scroll>div{transition:transform .22s ease}
 .row{padding:0 3rem;margin:1rem 0 0}
@@ -120,7 +120,7 @@ body:not(.info-on) .card.focus .ttl{font-size:1.35rem;font-weight:700;max-height
 #brand,#sub{white-space:nowrap}
 #brand{flex:none}
 #top{gap:.8rem;min-width:0}
-#sub{font-size:1.1rem;flex:none}
+#bar #sub{flex:none}
 #bar{min-width:0;flex-wrap:nowrap}
 #bar>*{flex:none;font-size:1.15rem;padding:.4rem .85rem;white-space:nowrap}
 #clock{flex:none;margin-left:auto}

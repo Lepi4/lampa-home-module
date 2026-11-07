@@ -33,7 +33,6 @@ import java.net.Inet4Address
 import java.net.URL
 import java.util.UUID
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
 
 // Lampa Media Center: домашний экран-оболочка внутри окна Lampa. Страница из assets лежит поверх WebView Lampa (тот же процесс,
 // то же окно, одна задача): Lampa грузится и работает под оболочкой без прозрачных окон, порядок задач больше ни на что не влияет.
@@ -253,31 +252,51 @@ class ShellHost(private val a: MainActivity) : McHostApi {
 
         @JavascriptInterface fun deviceName(): String = Build.MODEL ?: "Android"
 
+        // Префиксы /24 всех текущих IPv4, не только активной сети: на первом запуске activeNetwork часто ещё пуст.
+        private fun lanPrefixes(): LinkedHashSet<String> {
+            val prefixes = LinkedHashSet<String>()
+            try {
+                val cm = a.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val nets = LinkedHashSet<android.net.Network>()
+                cm.activeNetwork?.let { nets.add(it) }
+                cm.allNetworks?.forEach { nets.add(it) }
+                for (n in nets) {
+                    cm.getLinkProperties(n)?.linkAddresses?.forEach { la ->
+                        val ad = la.address
+                        if (ad is Inet4Address && !ad.isLoopbackAddress && !ad.isLinkLocalAddress) {
+                            val host = ad.hostAddress ?: return@forEach
+                            prefixes.add(host.substringBeforeLast('.'))
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+            return prefixes
+        }
+
         // Поиск сервера: адрес из подсказки, затем все адреса своей подсети /24 по порту 9118. Находки приходят по одной.
+        // На первой установке сеть часто поднимается на пару секунд позже экрана — без ожидания список адресов пуст и поиск сразу «ничего не нашёл».
         @JavascriptInterface fun discover(hintsJson: String) {
             pool.execute {
                 val found = HashSet<String>()
                 val hosts = LinkedHashSet<String>()
                 try { JSONArray(hintsJson).let { arr -> for (i in 0 until arr.length()) hosts.add(arr.getString(i)) } } catch (_: Exception) {}
-                val prefixes = LinkedHashSet<String>()
-                try {
-                    val cm = a.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                    val lp = cm.getLinkProperties(cm.activeNetwork)
-                    lp?.linkAddresses?.forEach { la ->
-                        val ad = la.address
-                        if (ad is Inet4Address && !ad.isLoopbackAddress) prefixes.add(ad.hostAddress!!.substringBeforeLast('.'))
-                    }
-                } catch (_: Exception) {}
+                var prefixes = lanPrefixes()
+                var waited = 0
+                while (prefixes.isEmpty() && waited < 8) {
+                    try { Thread.sleep(1000) } catch (_: Exception) {}
+                    waited++
+                    prefixes = lanPrefixes()
+                }
                 for (p in prefixes) for (i in 1..254) hosts.add("http://$p.$i:9118")
                 val total = hosts.size
-                val done = AtomicInteger(0)
                 val latch = java.util.concurrent.CountDownLatch(total)
                 for (h in hosts) try { pool.execute {
                     try {
                         val base = if (h.startsWith("http")) h else "http://$h"
                         val c = URL("$base/home/whoami").openConnection() as HttpURLConnection
                         try {
-                            c.connectTimeout = 450; c.readTimeout = 900
+                            c.connectTimeout = 800; c.readTimeout = 1200
+                            c.setRequestProperty("Accept", "application/json")
                             if (c.responseCode == 200) {
                                 val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
                                 if (o.optString("app") == "lampa-home" && found.add(o.optString("id"))) {
@@ -287,12 +306,9 @@ class ShellHost(private val a: MainActivity) : McHostApi {
                             }
                         } finally { c.disconnect() }
                     } catch (_: Exception) {
-                    } finally {
-                        done.incrementAndGet()
-                        latch.countDown()
-                    }
+                    } finally { latch.countDown() }
                 } } catch (_: java.util.concurrent.RejectedExecutionException) { latch.countDown() }
-                try { latch.await(25, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
+                try { latch.await(40, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) {}
                 js("window.__mc && window.__mc.onScanDone(${found.size})")
             }
         }

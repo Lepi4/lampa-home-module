@@ -23,6 +23,8 @@ public class ServiceUiController : BaseController
         ConnectTimeout = TimeSpan.FromSeconds(8), PooledConnectionLifetime = TimeSpan.FromMinutes(5)
     }) { Timeout = Timeout.InfiniteTimeSpan };
     static readonly string[] Hop = { "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Host", "Content-Length", "Content-Encoding", "Set-Cookie" };
+    // These belong on HttpContent. Putting them on the request headers makes HttpClient throw, and the proxy turns that into 502.
+    static readonly string[] ContentHeader = { "Allow", "Content-Disposition", "Content-Language", "Content-Location", "Content-MD5", "Content-Range", "Content-Type", "Expires", "Last-Modified" };
     public static int Port(string service) => service switch { "channel-manager" => 3002, "torrserver" => 8090, "tvheadend" => 9981, _ => 0 };
     static string Prefix(string service) => "/home/services/" + service + "/";
     public static string Rewrite(string text, string contentType, string prefix, string requestPath = null)
@@ -173,19 +175,32 @@ new MutationObserver(function(events){events.forEach(function(e){if(e.type==='at
             return new EmptyResult();
         }
         using var request = new HttpRequestMessage(new HttpMethod(Request.Method), uri);
-        if (Request.ContentLength > 0 || Request.Headers.ContainsKey("Transfer-Encoding")) {
-            request.Content = new StreamContent(Request.Body);
-            if (Request.ContentLength.HasValue) request.Content.Headers.ContentLength = Request.ContentLength;
-        }
-        foreach (var header in Request.Headers) {
-            if (Hop.Contains(header.Key, StringComparer.OrdinalIgnoreCase) || header.Key.StartsWith("X-Home-", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Cookie", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Origin", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Referer", StringComparison.OrdinalIgnoreCase)) continue;
-            if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray())) request.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
-        }
-        string cookies = Cookies(Request.Headers["Cookie"]);
-        if (cookies.Length > 0) request.Headers.TryAddWithoutValidation("Cookie", cookies);
-        request.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", prefix.TrimEnd('/'));
-        request.Headers.TryAddWithoutValidation("Origin", uri.GetLeftPart(UriPartial.Authority));
+        // Tvheadend closes a POST that arrives as chunked or with Expect: 100-continue. Send a counted body.
+        request.Headers.ExpectContinue = false;
         try {
+            bool canBody = HttpMethods.IsPost(Request.Method) || HttpMethods.IsPut(Request.Method) || HttpMethods.IsPatch(Request.Method) || HttpMethods.IsDelete(Request.Method);
+            if (canBody && (Request.ContentLength > 0 || Request.Headers.ContainsKey("Transfer-Encoding") || !string.IsNullOrEmpty(Request.ContentType))) {
+                if (Request.ContentLength == null || Request.ContentLength <= 32L * 1024 * 1024) {
+                    using var buffer = new MemoryStream();
+                    await Request.Body.CopyToAsync(buffer, HttpContext.RequestAborted);
+                    request.Content = new ByteArrayContent(buffer.ToArray());
+                } else {
+                    request.Content = new StreamContent(Request.Body);
+                    if (Request.ContentLength.HasValue) request.Content.Headers.ContentLength = Request.ContentLength;
+                }
+            }
+            foreach (var header in Request.Headers) {
+                if (Hop.Contains(header.Key, StringComparer.OrdinalIgnoreCase) || ContentHeader.Contains(header.Key, StringComparer.OrdinalIgnoreCase) || header.Key.StartsWith("X-Home-", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Cookie", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Origin", StringComparison.OrdinalIgnoreCase) || header.Key.Equals("Referer", StringComparison.OrdinalIgnoreCase)) continue;
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+            }
+            if (request.Content != null)
+                foreach (var header in Request.Headers)
+                    if (ContentHeader.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
+                        request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+            string cookies = Cookies(Request.Headers["Cookie"]);
+            if (cookies.Length > 0) request.Headers.TryAddWithoutValidation("Cookie", cookies);
+            request.Headers.TryAddWithoutValidation("X-Forwarded-Prefix", prefix.TrimEnd('/'));
+            request.Headers.TryAddWithoutValidation("Origin", uri.GetLeftPart(UriPartial.Authority));
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, HttpContext.RequestAborted);
             Response.StatusCode = (int)response.StatusCode;
             foreach (var header in response.Headers.Concat(response.Content.Headers)) {

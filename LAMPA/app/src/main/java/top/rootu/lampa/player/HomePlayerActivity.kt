@@ -1471,6 +1471,29 @@ class HomePlayerActivity : Activity() {
         updateTitle()
     }
 
+    // Кэш суток годится, пока в нём есть текущая передача. После её конца или через 30 минут берём свежий гид.
+    private fun freshDay(sid: String): org.json.JSONArray? {
+        val cached = dayCache[sid] ?: return null
+        val age = System.currentTimeMillis() - cached.first
+        if (age >= 30 * 60_000) return null
+        if (age >= 45_000) {
+            val now = System.currentTimeMillis() / 1000
+            var covers = false
+            for (i in 0 until cached.second.length()) {
+                val o = cached.second.getJSONObject(i)
+                if (o.optLong("s") <= now && o.optLong("e") > now) { covers = true; break }
+            }
+            if (!covers) return null
+        }
+        return cached.second
+    }
+
+    private fun openLogo(url: String): HttpURLConnection {
+        val c = if (homeBase.isNotBlank() && url.startsWith(homeBase + "/")) homeConnection(url) else URL(url).openConnection() as HttpURLConnection
+        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        return c
+    }
+
     // логотип канала (пикон) из программы передач: загружаем в фоне и кэшируем
     // логотипа нет (в программе передач их нет у ~30% каналов) — рисуем значок с первыми буквами названия
     private fun placeholderLogo(name: String): android.graphics.Bitmap {
@@ -1512,7 +1535,7 @@ class HomePlayerActivity : Activity() {
                 // переходы вручную: адреса логотипов часто http, а сервер переводит на https (301)
                 var cur = url
                 for (hop in 0 until 5) {
-                    val c = URL(cur).openConnection() as HttpURLConnection
+                    val c = openLogo(cur)
                     c.connectTimeout = 6000; c.readTimeout = 8000
                     c.instanceFollowRedirects = false
                     val code = c.responseCode
@@ -1549,8 +1572,8 @@ class HomePlayerActivity : Activity() {
         val sid = Uri.parse(uri).lastPathSegment ?: return
         detName.text = chNames.getOrNull(pos) ?: ""
         loadLogo(detLogo, logoMap[sid], chNames.getOrNull(pos) ?: "")
-        val cached = dayCache[sid]
-        if (cached != null && System.currentTimeMillis() - cached.first < 5 * 60_000) { renderDay(cached.second); return }
+        val cached = freshDay(sid)
+        if (cached != null) { renderDay(cached); return }
         detNow.text = "Загрузка…"; detDesc.text = ""; detNext.text = ""
         val base = (tvNowUrl ?: return).substringBefore("/tv/now")
         Thread {
@@ -1743,11 +1766,13 @@ class HomePlayerActivity : Activity() {
         scheduleLoading = true; ui.removeCallbacks(closeChannels)
         Thread {
             try {
-                val cached = dayCache[sid]
-                val arr = if (cached != null && System.currentTimeMillis() - cached.first < 5 * 60_000) cached.second else {
+                val cached = freshDay(sid)
+                val arr = if (cached != null) cached else {
                     val c = homeConnection("$base/tv/day?id=$sid")
                     c.connectTimeout = 6000; c.readTimeout = 8000
-                    try { JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optJSONArray("programs") ?: JSONArray() } finally { c.disconnect() }
+                    val got = try { JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optJSONArray("programs") ?: JSONArray() } finally { c.disconnect() }
+                    dayCache[sid] = Pair(System.currentTimeMillis(), got)
+                    got
                 }
                 val marked = HashSet<Long>()
                 try {

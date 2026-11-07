@@ -179,15 +179,30 @@
   try { applyClock(); } catch (e) {}
   // остаток подписки Кинопаба: нет аккаунта — не показываем; 0 дней — «истекла»
   function dayWord(n) { var m = n % 10, h = n % 100; return (h > 10 && h < 20) ? 'дней' : m === 1 ? 'день' : (m >= 2 && m <= 4) ? 'дня' : 'дней'; }
+  // Цвет остатка: привычный светлый выше 100 дней. Дальше каждый день сдвигает оттенок на 1:
+  // зелёный 50–100, синий 15–49, красный ниже 15.
+  function subColor(days) {
+    days = Math.max(0, days | 0);
+    if (days > 100) return '';
+    var step, r, g, b;
+    if (days >= 50) { step = days - 50; r = 24 + step; g = 110 + step; b = 48 + step; }
+    else if (days >= 15) { step = days - 15; r = 24 + step; g = 72 + step; b = 150 + step; }
+    else { step = days; r = 168 + step; g = 32 + step; b = 32 + step; }
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
   function loadSub() {
     var b = $('sub');
+    if (!b) return;
     if (!state.server || !state.profile) { setTimeout(loadSub, 4000); return; }
     api('/home/kp/sub?profile=' + encodeURIComponent(state.profile), function (d) {
+      if (!b) return;
       if (!d || !d.has) { b.style.display = 'none'; return; }
-      b.style.display = 'block';
-      b.textContent = d.expired || d.days <= 0 ? 'Кинопаб: истекла' : 'Кинопаб: ' + d.days + ' ' + dayWord(d.days);
-      b.className = (d.expired || d.days <= 5) ? 'low' : '';
-    }, function () { b.style.display = 'none'; });
+      var days = d.days | 0, expired = !!(d.expired || days <= 0);
+      b.style.display = 'inline-flex';
+      b.innerHTML = 'Кинопаб <b>' + (expired ? 'истекла' : days + ' ' + dayWord(days)) + '</b>';
+      b.style.background = subColor(expired ? 0 : days) || 'rgba(255,255,255,.12)';
+      b.style.color = '#fff';
+    }, function () { if (b) b.style.display = 'none'; });
   }
   setTimeout(loadSub, 3000); setInterval(loadSub, 30 * 60 * 1000);
 
@@ -297,8 +312,8 @@
       // на пультах удержание приходит повторяющимися keydown (иногда без «чистого» первого): стартуем и от повтора,
       // и срабатываем по времени удержания, не полагаясь только на таймер
       var now = Date.now();
-      if (!lp.down) { lp.down = true; lp.fired = false; lp.at = now; clearTimeout(lp.t); lp.t = setTimeout(function () { if (lp.down && !lp.fired) { lp.fired = true; longPress(); } }, 600); }
-      else if (!lp.fired && now - lp.at > 600) { lp.fired = true; clearTimeout(lp.t); longPress(); }
+      if (!lp.down) { lp.down = true; lp.fired = false; lp.at = now; clearTimeout(lp.t); lp.t = setTimeout(function () { if (lp.down && !lp.fired && longPress()) lp.fired = true; }, 600); }
+      else if (!lp.fired && now - lp.at > 600) { clearTimeout(lp.t); if (longPress()) lp.fired = true; }
       ev.preventDefault(); return;
     }
     if (k === 37) move(0, -1); else if (k === 39) move(0, 1); else if (k === 38) move(-1, 0); else if (k === 40) move(1, 0); else return;
@@ -309,7 +324,7 @@
     if (k !== 13 && k !== 23) return;
     if (!lp.down) return;                       // нажатие началось не на главном экране (например, в окне) — не реагируем
     lp.down = false; clearTimeout(lp.t);
-    if (!lp.fired && !state.setupOpen && !state.move && Date.now() - lp.at > 550) { lp.fired = true; longPress(); ev.preventDefault(); return; }   // удержание без повторов нажатия
+    if (!lp.fired && !state.setupOpen && !state.move && Date.now() - lp.at > 550 && longPress()) { lp.fired = true; ev.preventDefault(); return; }
     if (state.move) { ev.preventDefault(); return; }
     if (!lp.fired && !state.setupOpen) enter();
     ev.preventDefault();
@@ -326,11 +341,12 @@
     return mediaOf(it)==='tv'?(isAnime(it)?'Мои аниме':'Мои сериалы'):'Мои фильмы';
   }
   function longPress() {
-    if (state.setupOpen) return;
+    if (state.setupOpen) return false;
     var nav = state.nav[state.r], e = nav && nav.items[state.c];
-    if (!e) return;
-    if (e._pkg) { startMove(e); return; }
-    if (e._item) cardMenu(e, nav.id);
+    if (!e) return false;
+    if (e._pkg) { startMove(e); return true; }
+    if (e._item) { cardMenu(e, nav.id); return true; }
+    return false;
   }
 
 
@@ -499,7 +515,8 @@
     }, function () { setupFinish(url, load('mc_profile', '') || 'main', 1080); });
   }
 
-  function setupFind(ask) {
+  function setupFind(ask, attempt) {
+    attempt = attempt || 0;
     var box = $('setup'); box.innerHTML = '';
     box.appendChild(el('h1', null, 'Lampa Media Center'));
     var p = el('p', null, 'Ищу сервер в локальной сети…'); box.appendChild(p);
@@ -525,6 +542,7 @@
     };
     window.__mc.onScanDone = function () {
       if (!ask && found.length === 1) { adoptServer(found[0].url); return; }
+      if (!found.length && attempt < 1 && document.body.contains(p)) { p.textContent = 'Сеть ещё поднимается, ищу сервер ещё раз…'; setTimeout(function () { if (document.body.contains(p)) setupFind(ask, attempt + 1); }, 1500); return; }
       if (!found.length) p.textContent = 'Сервер не найден. Введите адрес вручную (например http://192.168.1.80:9118).';
       else p.textContent = 'Найден сервер. Выберите:';
       showChoices();
@@ -821,7 +839,11 @@
   }
 
   function buildBar() {
-    var bar = $('bar'); bar.innerHTML = '';
+    var bar = $('bar');
+    var sub = $('sub');
+    if (sub && sub.parentNode) sub.parentNode.removeChild(sub);
+    bar.innerHTML = '';
+    if (sub) bar.appendChild(sub);
     function btn(t, f) { var e = el('div', 'btn', t); e._act = f; bar.appendChild(e); }
     btn('Поиск', function () { openSearch(); });
     btn('Настройки', function () { openSettings(); });
@@ -1180,6 +1202,30 @@
       });
     });
     opt('saver');
+    group('Службы');
+    var diagHolder = el('div');
+    scroll.appendChild(diagHolder);
+    function paintDiag(d) {
+      diagHolder.innerHTML = '';
+      var list = (d && d.services) || [];
+      if (!list.length) { diagHolder.appendChild(el('div', 'srow', 'Нет данных')); return; }
+      list.forEach(function (s) {
+        var r = el('div', 'srow');
+        var l = el('div', 'sl', s.name || '');
+        if (s.detail) l.appendChild(el('small', null, s.detail));
+        var v = el('div', 'sv', s.ok ? 'доступен' : (s.error || 'ошибка'));
+        v.style.color = s.ok ? '#7dffa8' : '#ff8a80';
+        r.appendChild(l); r.appendChild(v);
+        diagHolder.appendChild(r);
+      });
+    }
+    function loadDiag() {
+      diagHolder.innerHTML = '';
+      diagHolder.appendChild(el('div', 'srow', 'Проверяю службы…'));
+      api('/home/diag', paintDiag, function () { paintDiag({ services: [{ name: 'Диагностика', ok: false, error: 'нет связи' }] }); }, 15000);
+    }
+    row('Обновить состояние служб', 'TorrServer, JacRed, аниме, телевидение', function () { return '›'; }, null, loadDiag);
+    loadDiag();
     group('Система');
     row('Очистить историю профиля','Закладки и тайминг сохранятся',function(){return '›';},null,function(){
       menuShow('Очистить историю текущего профиля?',[['Очистить',null,function(){writeApi('/home/history/clear',{},function(d){

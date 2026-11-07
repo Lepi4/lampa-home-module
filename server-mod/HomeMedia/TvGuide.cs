@@ -41,6 +41,7 @@ public static class TvStore
     public static DateTime EpgAt = DateTime.MinValue;
     static bool epgBusy;
     static string epgError;
+    static DateTime epgFailAt = DateTime.MinValue;
 
     public static JObject Config()
     {
@@ -357,28 +358,36 @@ public static class TvStore
 
     static System.Threading.Timer epgTimer;
 
-    // программа передач обновляется сама: через полминуты после старта сервера и затем каждые 8 часов
+    // программа передач обновляется сама: через полминуты после старта сервера и затем каждые 6 часов
     // (плюс при запросах плеера, если она старше 30 минут — см. EnsureEpg)
     public static void StartEpgTimer()
     {
-        epgTimer ??= new System.Threading.Timer(_ => { try { EpgAt = DateTime.MinValue; EnsureEpg(); } catch { } }, null, TimeSpan.FromSeconds(30), TimeSpan.FromHours(8));
+        epgTimer ??= new System.Threading.Timer(_ => { try { EnsureEpg(true); } catch { } }, null, TimeSpan.FromSeconds(30), TimeSpan.FromHours(6));
     }
 
-    // фоновая загрузка программы: не блокирует ответы
-    public static void EnsureEpg()
+    // фоновая загрузка программы: не блокирует ответы. force — плановый обход, он не смотрит на возраст.
+    // Неудачный обход не обнуляет уже разобранную программу и не повторяется чаще раза в 2 минуты.
+    public static void EnsureEpg(bool force = false)
     {
         LoadEpgFile();
-        if (epgBusy || DateTime.UtcNow - EpgAt < TimeSpan.FromMinutes(30)) return;
+        if (epgBusy) return;
+        if (!force && DateTime.UtcNow - EpgAt < TimeSpan.FromMinutes(30)) return;
+        if (!force && epgFailAt != DateTime.MinValue && DateTime.UtcNow - epgFailAt < TimeSpan.FromMinutes(2)) return;
         epgBusy = true;
         _ = Task.Run(async () =>
         {
-            try { await RefreshEpg(); epgError = null; }
-            catch (Exception ex) { epgError = ex.GetType().Name + ": " + ex.Message; }
+            try
+            {
+                bool ok = await RefreshEpg();
+                if (ok) { epgError = null; epgFailAt = DateTime.MinValue; }
+                else { epgError = "empty"; epgFailAt = DateTime.UtcNow; }
+            }
+            catch (Exception ex) { epgError = ex.GetType().Name + ": " + ex.Message; epgFailAt = DateTime.UtcNow; }
             finally { epgBusy = false; }
         });
     }
 
-    static async Task RefreshEpg()
+    static async Task<bool> RefreshEpg()
     {
         var chs = await Channels();
         var wanted = new HashSet<string>(chs.Select(c => c.Epg).Where(x => !string.IsNullOrEmpty(x)));
@@ -419,6 +428,8 @@ public static class TvStore
             xr.Read();
         }
         foreach (var l in d.Values) l.Sort((a, b) => a.S.CompareTo(b.S));
+        // Пустой ответ не подменяет рабочую программу: иначе один обрыв xmltv стирал гид до следующего часа.
+        if (d.Count == 0 && epg.Count > 0) return false;
         epg = d;
         EpgAt = DateTime.UtcNow;
         try
@@ -431,6 +442,7 @@ public static class TvStore
             File.WriteAllText(epgPath, o.ToString(Newtonsoft.Json.Formatting.None));
         }
         catch { }
+        return true;
     }
 
     public static (Prog now, Prog next) NowNext(string epgId)
@@ -650,12 +662,67 @@ public class TvGuideController : BaseController
             var list = ch.Select(c =>
             {
                 var (n, x) = TvStore.NowNext(c.Epg);
-                return new { id = c.Id, num = c.Num, name = c.Name, logo = c.Logo, epg = c.Epg, url = TvStore.ClientStreamUrl(c.Url, Request.Host.Host), src = TvStore.SrcType(c.Id), n = Pr(n), x = Pr(x) };
+                return new { id = c.Id, num = c.Num, name = c.Name, logo = LogoUrl(c), epg = c.Epg, url = TvStore.ClientStreamUrl(c.Url, Request.Host.Host), src = TvStore.SrcType(c.Id), n = Pr(n), x = Pr(x) };
             }).ToList();
             TvStore.FillSrcTypesPublic(ch);
             return Json(new { channels = list, epg_loading = TvStore.EpgBusy });
         }
         catch (Exception ex) { return Json(new { error = "failed", message = ex.GetType().Name + ": " + ex.Message }, 502); }
+    }
+
+    // Пикон отдаёт сам Lampac: приставка ходит на свой сервер, а не на чужой CDN,
+    // который режет запросы без браузерного User-Agent. Адрес исходной картинки остаётся в плейлисте.
+    string LogoUrl(TvStore.Chan c)
+    {
+        if (string.IsNullOrWhiteSpace(c.Logo) || !c.Logo.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return null;
+        return $"{Request.Scheme}://{Request.Host}/tv/logo/{c.Id}";
+    }
+
+    static string LogoType(byte[] b)
+    {
+        if (b.Length > 3 && b[0] == 0x89 && b[1] == 0x50) return "image/png";
+        if (b.Length > 2 && b[0] == 0xFF && b[1] == 0xD8) return "image/jpeg";
+        if (b.Length > 12 && b[0] == 0x52 && b[1] == 0x49) return "image/webp";
+        if (b.Length > 4 && b[0] == 0x47 && b[1] == 0x49) return "image/gif";
+        return "image/jpeg";
+    }
+
+    [HttpGet, AllowAnonymous]
+    [Route("tv/logo/{id}")]
+    public async Task<ActionResult> Logo(string id)
+    {
+        if (string.IsNullOrEmpty(id) || !Regex.IsMatch(id, "^[0-9A-Za-z]{4,32}$")) return NotFound();
+        string dir = Path.Combine(Directory.GetCurrentDirectory(), "database", "tv-logos");
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, id + ".bin");
+        string meta = path + ".ct";
+        if (System.IO.File.Exists(path) && System.IO.File.Exists(meta) && DateTime.UtcNow - System.IO.File.GetLastWriteTimeUtc(path) < TimeSpan.FromDays(3))
+        {
+            Response.Headers["Cache-Control"] = "public, max-age=86400";
+            return PhysicalFile(path, System.IO.File.ReadAllText(meta));
+        }
+        List<TvStore.Chan> chs;
+        try { chs = await TvStore.Channels(); }
+        catch { return NotFound(); }
+        var ch = chs.FirstOrDefault(c => c.Id == id);
+        if (ch == null || string.IsNullOrWhiteSpace(ch.Logo) || !ch.Logo.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return NotFound();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var req = new HttpRequestMessage(HttpMethod.Get, ch.Logo);
+            req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            using var res = await client.SendAsync(req, cts.Token);
+            if (!res.IsSuccessStatusCode) return NotFound();
+            var bytes = await res.Content.ReadAsByteArrayAsync();
+            if (bytes.Length < 32 || bytes.Length > 2_000_000) return NotFound();
+            string ct = LogoType(bytes);
+            System.IO.File.WriteAllBytes(path, bytes);
+            System.IO.File.WriteAllText(meta, ct);
+            Response.Headers["Cache-Control"] = "public, max-age=86400";
+            return File(bytes, ct);
+        }
+        catch { return NotFound(); }
     }
 
     // сейчас/далее для всех каналов, ключ — id потока (для плеера)

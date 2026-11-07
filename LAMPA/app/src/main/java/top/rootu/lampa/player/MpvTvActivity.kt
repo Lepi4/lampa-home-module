@@ -586,6 +586,29 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         return bmp
     }
 
+    private fun freshDay(sid: String): JSONArray? {
+        val cached = dayCache[sid] ?: return null
+        val age = System.currentTimeMillis() - cached.first
+        if (age >= 30 * 60_000) return null
+        if (age >= 45_000) {
+            val now = System.currentTimeMillis() / 1000
+            var covers = false
+            for (i in 0 until cached.second.length()) {
+                val o = cached.second.getJSONObject(i)
+                if (o.optLong("s") <= now && o.optLong("e") > now) { covers = true; break }
+            }
+            if (!covers) return null
+        }
+        return cached.second
+    }
+
+    private fun openLogo(url: String): HttpURLConnection {
+        val base = playbackOwner.optString("server_base")
+        val c = if (base.isNotBlank() && url.startsWith(base.trimEnd('/') + "/")) homeConnection(url) else URL(url).openConnection() as HttpURLConnection
+        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        return c
+    }
+
     private fun loadLogo(iv: ImageView, url: String?, name: String = "") {
         iv.tag = url ?: ("ph:" + name)
         if (url.isNullOrEmpty()) {
@@ -602,7 +625,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
                 // переходы вручную: адреса логотипов часто http, а сервер переводит на https (301)
                 var curUrl = url
                 for (hop in 0 until 5) {
-                    val c = URL(curUrl).openConnection() as HttpURLConnection
+                    val c = openLogo(curUrl)
                     c.connectTimeout = 6000; c.readTimeout = 8000
                     c.instanceFollowRedirects = false
                     val code = c.responseCode
@@ -639,8 +662,8 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         val sid = Uri.parse(uri).lastPathSegment ?: return
         detName.text = names.getOrNull(pos) ?: ""
         loadLogo(detLogo, logoMap[sid], names.getOrNull(pos) ?: "")
-        val cached = dayCache[sid]
-        if (cached != null && System.currentTimeMillis() - cached.first < 5 * 60_000) { renderDay(cached.second); return }
+        val cached = freshDay(sid)
+        if (cached != null) { renderDay(cached); return }
         detNow.text = "Загрузка…"; detDesc.text = ""; detNext.text = ""
         val base = (tvNowUrl ?: return).substringBefore("/tv/now")
         Thread {
@@ -881,8 +904,8 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         progMenu.visibility = View.VISIBLE
         chList.isFocusable = false
         progList.requestFocus()
-        val cached = dayCache[sid]
-        if (cached != null && System.currentTimeMillis() - cached.first < 5 * 60_000) { fillProg(cached.second); return }
+        val cached = freshDay(sid)
+        if (cached != null) { fillProg(cached); return }
         val base = apiBase() ?: return
         Thread {
             try {
