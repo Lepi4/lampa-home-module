@@ -28,6 +28,7 @@
     "AnimeGo.cs",
     "Panel.cs",
     "ServiceControl.cs",
+    "HomeDiag.cs",
     "NetworkProxy.cs",
     "ServiceUi.cs",
     "Ops.cs",

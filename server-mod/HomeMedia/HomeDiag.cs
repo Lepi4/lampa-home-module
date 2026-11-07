@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json.Linq;
+using Shared;
 using System;
 using System.Linq;
 using System.Net.Http;
@@ -17,9 +18,20 @@ public class HomeDiagController : BaseController
     [Route("home/diag")]
     public async Task<ActionResult> Diag()
     {
-        var services = await Task.WhenAll(Torr(), Jac(), Anime("AniLibria", "https://anilibria.top/api/v1/app/search/releases?query=a"), Anime("AnimeGo", "https://animego.me/"), AnimeLib(), Kodik(), Tv());
+        var services = await Task.WhenAll(
+            Run("TorrServer", Torr), Run("JacRed", Jac), Run("AniLibria", AniLibria), Run("AnimeGo", AnimeGo),
+            Run("AnimeLib", AnimeLib), Run("Kodik", Kodik), Run("Телевидение", Tv));
         return Json(new { services });
     }
+
+    static async Task<object> Run(string name, Func<Task<object>> probe)
+    {
+        try { return await probe(); }
+        catch (Exception ex) { return Row(name, false, ex.GetType().Name, ""); }
+    }
+
+    static Task<object> AniLibria() => Anime("AniLibria", "https://anilibria.top/api/v1/app/search/releases?query=a");
+    static Task<object> AnimeGo() => Anime("AnimeGo", "https://animego.me/");
 
     static async Task<object> Probe(string name, string url, string detail)
     {
@@ -46,7 +58,7 @@ public class HomeDiagController : BaseController
 
     static async Task<object> Jac()
     {
-        var hosts = KpSearch.Hosts().Children<JObject>()
+        var hosts = JacredSearch.Hosts().Children<JObject>()
             .Where(h => (bool?)h["enable"] != false && !string.IsNullOrEmpty((string)h["host"]))
             .Select(h => ((string)h["host"]).TrimEnd('/'))
             .Distinct()
