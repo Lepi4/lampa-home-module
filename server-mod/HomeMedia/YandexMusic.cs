@@ -382,6 +382,154 @@ public class YandexMusicController : BaseController
         return Json(new { tracks = arr, batch = (string)j["result"]?["batchId"] });
     }
 
+    // Плейлист дня: персональная подборка из ленты, не обычный плейлист пользователя
+    [HttpGet, AllowAnonymous]
+    [Route("ym/day")]
+    public async Task<ActionResult> Day()
+    {
+        if (YmStore.Token == null) return NeedAuth();
+        JToken data = null;
+        var (code, j) = await YmStore.Get("/feed");
+        if (code == 200) data = FindDay(j["result"]);
+        if (data == null)
+        {
+            var (c2, j2) = await YmStore.Get("/landing3?blocks=personalplaylists");
+            if (c2 == 200) data = FindDay(j2["result"]);
+        }
+        if (data == null) return Json(new { error = "no_day" }, 404);
+        string title = (string)data["title"] ?? "Плейлист дня";
+        var tracks = await ReadTracks(data["tracks"] as JArray);
+        if (tracks.Count == 0)
+        {
+            string uid = data["uid"]?.ToString() ?? data["owner"]?["uid"]?.ToString();
+            string kind = data["kind"]?.ToString();
+            if (!string.IsNullOrEmpty(uid) && !string.IsNullOrEmpty(kind))
+            {
+                var (pc, pj) = await YmStore.Get($"/users/{Uri.EscapeDataString(uid)}/playlists/{Uri.EscapeDataString(kind)}");
+                if (pc == 200)
+                {
+                    title = (string)pj["result"]?["title"] ?? title;
+                    tracks = await ReadTracks(pj["result"]?["tracks"] as JArray);
+                }
+            }
+        }
+        return Json(new { title, tracks });
+    }
+
+    static JToken FindDay(JToken node)
+    {
+        if (node == null) return null;
+        if (node.Type == JTokenType.Object)
+        {
+            if ((string)node["type"] == "playlistOfTheDay")
+            {
+                var inner = node["data"];
+                if (inner != null && inner["kind"] != null) return inner;
+                if (node["kind"] != null) return node;
+                if (inner != null) return FindDay(inner) ?? inner;
+            }
+            foreach (var p in ((JObject)node).Properties())
+            {
+                var found = FindDay(p.Value);
+                if (found != null) return found;
+            }
+        }
+        else if (node.Type == JTokenType.Array)
+        {
+            foreach (var item in node)
+            {
+                var found = FindDay(item);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    static async Task<JArray> ReadTracks(JArray items)
+    {
+        var arr = new JArray();
+        var missing = new List<string>();
+        if (items != null)
+        {
+            foreach (var it in items)
+            {
+                var n = YmStore.Norm(it);
+                if (n != null && !string.IsNullOrEmpty((string)n["title"])) arr.Add(n);
+                else
+                {
+                    var src = it["track"] ?? it;
+                    string id = src["id"]?.ToString();
+                    string album = it["albumId"]?.ToString() ?? src["albums"]?.FirstOrDefault()?["id"]?.ToString();
+                    if (!string.IsNullOrEmpty(id)) missing.Add(string.IsNullOrEmpty(album) ? id : id + ":" + album);
+                }
+            }
+        }
+        for (int i = 0; i < missing.Count; i += 100)
+            foreach (var n in await YmStore.Hydrate(missing.Skip(i).Take(100))) arr.Add(n);
+        return arr;
+    }
+
+    // Базовые настройки «Моей волны»: характер, настроение, язык. Названия приходят от Яндекса.
+    [HttpGet, AllowAnonymous]
+    [Route("ym/wave/categories")]
+    public async Task<ActionResult> WaveCategories()
+    {
+        if (YmStore.Token == null) return NeedAuth();
+        var (code, j) = await YmStore.Get("/rotor/station/user:onyourwave/info");
+        if (code != 200) return Json(new { error = "api", code }, 502);
+        var row = (j["result"] as JArray)?.FirstOrDefault();
+        var restrictions = row?["station"]?["restrictions2"] as JObject;
+        var settings = row?["settings2"] as JObject ?? new JObject();
+        var groups = new JArray();
+        foreach (var id in new[] { "diversity", "moodEnergy", "language" })
+        {
+            var block = restrictions?[id] as JObject;
+            if (block == null) continue;
+            var values = new JArray();
+            foreach (var v in (block["possibleValues"] as JArray) ?? new JArray())
+            {
+                string value = v["value"]?.ToString();
+                if (string.IsNullOrEmpty(value)) continue;
+                values.Add(new JObject { ["value"] = value, ["name"] = (string)v["name"] ?? value });
+            }
+            string current = settings[id]?.ToString();
+            string currentName = null;
+            foreach (var v in values) if ((string)v["value"] == current) currentName = (string)v["name"];
+            groups.Add(new JObject
+            {
+                ["id"] = id,
+                ["title"] = (string)block["name"] ?? id,
+                ["current"] = current,
+                ["currentName"] = currentName,
+                ["values"] = values
+            });
+        }
+        return Json(new
+        {
+            groups,
+            diversity = settings["diversity"]?.ToString(),
+            mood = settings["moodEnergy"]?.ToString(),
+            language = settings["language"]?.ToString()
+        });
+    }
+
+    [HttpGet, HttpPost, AllowAnonymous]
+    [Route("ym/wave/settings")]
+    public async Task<ActionResult> WaveSettings(string diversity, string mood, string language)
+    {
+        if (YmStore.Token == null) return NeedAuth();
+        if (string.IsNullOrWhiteSpace(diversity) || string.IsNullOrWhiteSpace(mood) || string.IsNullOrWhiteSpace(language))
+            return Json(new { error = "bad_settings" }, 400);
+        var (code, _) = await YmStore.PostForm("/rotor/station/user:onyourwave/settings2", new Dictionary<string, string>
+        {
+            ["diversity"] = diversity,
+            ["moodEnergy"] = mood,
+            ["language"] = language,
+            ["type"] = "rotor"
+        });
+        return Json(new { ok = code == 200 });
+    }
+
     [HttpGet, HttpPost, AllowAnonymous]
     [Route("ym/wave/feedback")]
     public async Task<ActionResult> WaveFeedback(string station, string type, string track = null, string batch = null, double seconds = 0)
