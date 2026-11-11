@@ -105,7 +105,7 @@ public class ProfilesController : BaseController
         var chosen=string.IsNullOrEmpty(id)?null:Profiles.Get(id);
         return chosen!=null&&!(bool)chosen["archived"]?chosen:Profiles.Get(Profiles.DefaultId);
     }
-    static readonly HashSet<string> RowsAllowed=new(){"continue","history","watching","watching_anime","watching_cartoons","my_movies","my_cartoons","new_movie","new_serial","top_new","anime","ru_serial","ru_movie","new_cartoon","new_cartoon_series","youtube"};
+    static readonly HashSet<string> RowsAllowed=new(){"continue","history","watching","watching_anime","watching_cartoons","my_movies","my_cartoons","new_movie","new_serial","top_new","anime","ru_serial","ru_movie","new_cartoon","new_cartoon_series","youtube","vk"};
 
     [HttpGet,AllowAnonymous,Route("home/profiles")]
     public ActionResult List()=>J(new {enabled=Profiles.Enabled,test_instance=Profiles.IsTest,profiles=new JArray(Profiles.List().Children<JObject>().Select(p=>new JObject { ["id"]=p["id"],["name"]=p["name"],["is_child"]=p["is_child"],["has_pin"]=p["has_pin"] }))});
@@ -413,9 +413,15 @@ public class ProfilesController : BaseController
                 if(user.Child&&!string.Equals(pack,(string)cfg["youtube_profile"],System.StringComparison.Ordinal))return J(new{error="adult_required"},403);
                 cfg["youtube_profile"]=pack;
             }
+            if(b["vk_profile"]!=null){
+                string pack=(string)b["vk_profile"];
+                if(!VkStore.CanAssign(user.Id,pack))return J(new{error="bad_vk_profile"},400);
+                if(user.Child&&!string.Equals(pack,(string)cfg["vk_profile"],System.StringComparison.Ordinal))return J(new{error="adult_required"},403);
+                cfg["vk_profile"]=pack;
+            }
             if(!user.Child){
                 foreach(string key in new[]{"torrent_auto","torrent_max_height","torrent_min_seeds","torrent_allow_hevc","torrent_allow_hdr","allow_subtitles_only","kinopub_ru_audio","feed_block_quality"})if(b[key]!=null)cfg[key]=b[key];
-            }else if(b["youtube_profile"]==null||b.Properties().Any(p=>p.Name!="youtube_profile"))return J(new{error="adult_required"},403);
+            }else if((b["youtube_profile"]==null&&b["vk_profile"]==null)||b.Properties().Any(p=>p.Name!="youtube_profile"&&p.Name!="vk_profile"))return J(new{error="adult_required"},403);
             HomeDb.With(c=>Profiles.Exec(c,"UPDATE user_profiles SET settings=@j WHERE id=@p",("@j",cfg.ToString(Formatting.None)),("@p",user.Id)));
         }
         return J(new{settings=Profiles.Get(user.Id)["settings"]});
@@ -475,6 +481,9 @@ public class ProfilesController : BaseController
             string ytPack=(string)cfg["youtube_profile"];
             if(string.IsNullOrEmpty(ytPack))cfg.Remove("youtube_profile");
             else if(!YtStore.CanAssign(id,ytPack))return J(new{error="bad_youtube_profile"},400);
+            string vkPack=(string)cfg["vk_profile"];
+            if(string.IsNullOrEmpty(vkPack))cfg.Remove("vk_profile");
+            else if(!VkStore.CanAssign(id,vkPack))return J(new{error="bad_vk_profile"},400);
             HomeDb.With(c=>Profiles.Exec(c,@"INSERT INTO user_profiles(id,name,is_child,max_age,pin,is_admin,settings) VALUES(@id,@n,@c,@a,@p,@ad,@j)
 ON CONFLICT(id) DO UPDATE SET name=@n,is_child=@c,max_age=@a,pin=@p,is_admin=@ad,settings=@j,policy_rev=user_profiles.policy_rev+1",("@id",id),("@n",name),("@c",child?1:0),("@a",age),("@p",pin),("@ad",admin?1:0),("@j",cfg.ToString(Formatting.None))));
             if(old!=null&&((string)old["pin_hash"]!=pin||(bool)old["is_child"]!=child||(bool)old["is_admin"]!=admin))HomeDb.With(c=>Profiles.Exec(c,"UPDATE user_sessions SET revoked=1 WHERE profile_id=@p AND token_hash<>@actor",("@p",id),("@actor",Viewer()?.TokenHash??"")));

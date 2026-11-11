@@ -51,7 +51,7 @@ public static class ProfileCatalogPages
     }
     public static bool Supports(string mode)=>new[]{"top_new","new_movie","new_serial","new_cartoon","new_cartoon_series","anime","ru_movie","ru_serial"}.Contains(mode);
     static string ModeOf(string key){ var p=(key??"").Split('|'); return p.Length>3?p[3]:""; }
-    public static async Task<(JArray results,int pages,bool more)> Get(string key,int page,Func<int,Task<(JArray results,int pages)>> load,Func<JArray,Task> verify,CancellationToken cancellation=default)
+    public static async Task<(JArray results,int pages,bool more)> Get(string key,int page,Func<int,Task<(JArray results,int pages)>> load,Func<JArray,Task> verify,CancellationToken cancellation=default,bool fill=false)
     {
         foreach(var pair in Pools.Where(x=>DateTime.UtcNow-x.Value.LastUsed>TimeSpan.FromHours(4)).ToArray())Pools.TryRemove(pair.Key,out _);
         var pool=Pools.GetOrAdd(key,_=>new Pool());
@@ -72,8 +72,9 @@ public static class ProfileCatalogPages
                 foreach(var card in verified.Children<JObject>())pool.Pending.Enqueue(card);
                 pool.Candidates=new JArray();
             }
-            int scans=0;var deadline=DateTime.UtcNow.AddSeconds(12);
-            var displayDeadline=DateTime.UtcNow.AddSeconds(2);
+            int scans=0;var deadline=DateTime.UtcNow.AddSeconds(fill?18:12);
+            // Лента лаунчера ждёт полный ряд. Короткий показ через две секунды оставляем только сетке каталога.
+            var displayDeadline=DateTime.UtcNow.AddSeconds(fill?18:2);
             while(pool.Pages.Count<page)
             {
                 // A previous verification may have been cancelled after the last
@@ -102,13 +103,13 @@ public static class ProfileCatalogPages
                         // Child policy may already have reduced a source page to
                         // one card. Do not collect twenty such pages before the
                         // first availability check and the partial-page deadline.
-                        if(candidates.Count>0&&DateTime.UtcNow>=displayDeadline)break;
+                        if(!fill&&candidates.Count>0&&DateTime.UtcNow>=displayDeadline)break;
                     }
                     if(candidates.Count>0)await PublishCandidates();
                     // Sparse child catalogs need not hold already allowed cards
                     // while searching for a full twenty. Publish a short page;
                     // keep the cursor/pending candidates and truthful has_more.
-                    if(pool.Pending.Count>0&&DateTime.UtcNow>=displayDeadline)break;
+                    if(!fill&&pool.Pending.Count>0&&DateTime.UtcNow>=displayDeadline)break;
                 }
                 var filled=new JArray();while(filled.Count<20&&pool.Pending.Count>0)filled.Add(pool.Pending.Dequeue());
                 if(filled.Count==0&&!pool.End)

@@ -14,6 +14,7 @@ interface McHostApi {
     fun hide()
     fun onHome()
     fun onResume()
+    fun noteWake(awaySec: Long) {}
     fun onPause()
     fun onResult(requestCode: Int, resultCode: Int, data: Intent?)
     fun back()

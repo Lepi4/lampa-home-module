@@ -68,6 +68,11 @@
   .code { font: 650 26px ui-monospace, Consolas, monospace; letter-spacing: .12em; padding: 8px 14px; background: var(--chip); border-radius: 10px; display: inline-block; margin: 6px 0; }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; }
   .toast.show { opacity: .94; }
+  .pick { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .pick-card { background: var(--card); color: var(--ink); border-radius: 14px; padding: 16px; width: min(520px, 100%); max-height: 80vh; overflow: auto; display: grid; gap: 10px; }
+  .pick-card h3 { margin: 0; font-size: 16px; }
+  .pick-list { display: grid; gap: 6px; }
+  .pick-list button { text-align: left; }
   @media (max-width: 560px) { .row .k { min-width: 100%; } }
 </style>
 </head>
@@ -596,6 +601,138 @@
   }
 
   // ------------------------------------------------------------------ YouTube: профили и каналы
+  function renderWeather(box) {
+    var status = el('div', { class: 'muted', text: 'Загрузка…' });
+    var input = el('input', { type: 'text', placeholder: 'Название города', maxlength: '80' });
+    var btn = el('button', { class: 'primary', text: 'Найти' });
+    box.appendChild(status);
+    box.appendChild(el('div', { class: 'row' }, input, btn));
+    function paint(d) {
+      if (!d || d.configured === false) { status.className = 'muted'; status.textContent = 'Город не выбран.'; return; }
+      if (!d.configured) { status.className = 'muted'; status.textContent = 'Погода не прочитана.'; return; }
+      var temp = d.weather && d.temp != null ? (Math.round(d.temp * 10) / 10) + '° · ' + (d.descr || '') : 'сейчас без данных';
+      status.className = d.stale ? 'muted' : '';
+      status.textContent = (d.city_name || '') + (d.city_region ? ' · ' + d.city_region : '') + ' — ' + temp + (d.stale ? ' · данные устарели' : '');
+    }
+    api('/home/weather').then(function (r) { paint(r.json); }).catch(function () { status.textContent = 'Погода не прочитана.'; });
+    function find() {
+      var q = input.value.trim();
+      if (q.length < 2) { toast('Введите название города'); return; }
+      btn.disabled = true;
+      api('/home/weather/search?q=' + encodeURIComponent(q)).then(function (r) {
+        btn.disabled = false;
+        if (!r.ok || !r.json || r.json.error) { toast(r.json && r.json.error === 'not_found' ? 'Город не найден' : 'Поиск не удался'); return; }
+        openPlaces(r.json);
+      }).catch(function () { btn.disabled = false; toast('Поиск не удался'); });
+    }
+    btn.addEventListener('click', find);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') find(); });
+    function openPlaces(data) {
+      var old = document.getElementById('pick'); if (old) old.remove();
+      var root = el('div', { class: 'pick', id: 'pick' });
+      var card = el('div', { class: 'pick-card' });
+      card.appendChild(el('h3', { text: data.step === 'geo' ? 'Какой это город?' : 'Точный пункт' }));
+      card.appendChild(el('p', { class: 'muted', text: data.step === 'geo' ? 'Название нашлось в разных местах. После выбора откроется список пунктов Gismeteo.' : 'Город сохранится только после выбора строки.' }));
+      var places = data.places || [];
+      if (!places.length) card.appendChild(el('p', { text: 'Рядом ничего не нашлось. Прежний город не изменён.' }));
+      var list = el('div', { class: 'pick-list' });
+      places.forEach(function (p) {
+        var label = (p.name || '') + (p.region ? ' · ' + p.region : '') + (p.distance != null ? ' · ' + p.distance + ' км' : '');
+        list.appendChild(el('button', { text: label, onclick: function () { choose(p, data.step); } }));
+      });
+      card.appendChild(list);
+      card.appendChild(el('button', { text: 'Закрыть', onclick: function () { root.remove(); } }));
+      root.appendChild(card);
+      root.addEventListener('click', function (e) { if (e.target === root) root.remove(); });
+      document.body.appendChild(root);
+    }
+    function choose(p, step) {
+      if (step !== 'gismeteo') {
+        api('/home/weather/near?lat=' + encodeURIComponent(p.lat) + '&lon=' + encodeURIComponent(p.lon)).then(function (r) {
+          if (!r.ok || !r.json) { toast('Список пунктов не загрузился'); return; }
+          openPlaces(r.json);
+        });
+        return;
+      }
+      api('/home/weather/city', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, name: p.name, region: p.region, lat: p.lat, lon: p.lon }) })
+        .then(function (r) {
+          var root = document.getElementById('pick'); if (root) root.remove();
+          if (!r.ok || !r.json || r.json.error) { toast(r.status === 403 ? 'Нужен вход администратора' : 'Город не сохранён'); return; }
+          paint(r.json); toast('Город сохранён');
+        });
+    }
+  }
+
+  function renderWake(box) {
+    api('/home/shell/wake').then(function (r) {
+      var rows = (r.json && r.json.rows) || [];
+      if (!rows.length) { box.appendChild(el('p', { class: 'muted', text: 'Пока пусто. Запись появится после сна приставки дольше 30 секунд.' })); return; }
+      rows.forEach(function (w) {
+        var ack = w.ack_ms < 0 ? 'нет ответа' : (w.ack_ms + ' мс' + (w.shell ? ', страница жива' : ', страница не поднялась'));
+        var chain = 'ТВ ' + (w.tv ? 'да' : 'нет') + ' · список ' + (w.launch ? 'да' : 'нет') + ' · плеер ' + (w.player ? 'да' : 'нет');
+        box.appendChild(kv((w.dev || '') + ' · ' + (w.sleep_s || 0) + ' с', ack + ' · ' + chain));
+      });
+    }).catch(function () { box.appendChild(el('p', { text: 'Журнал не прочитан.' })); });
+  }
+
+  function renderVk(box) {
+    box.appendChild(el('div', { class: 'sub', text: 'Наборы плейлистов текущего зрителя. Лента на приставке берёт отмеченный набор. Чужой набор виден после входа этим зрителем.' }));
+    api('/vk/profiles').then(function (r) {
+      if (!r.ok) { box.appendChild(el('p', { text: 'Наборы не прочитаны.' })); return; }
+      var d = r.json || {}, current = d.current;
+      (d.profiles || []).forEach(function (p) {
+        var wrap = el('div', { class: 'row', style: 'display:block;border-top:1px solid #2a2a2a;padding:.7em 0' });
+        var head = el('div', { style: 'display:flex;gap:.6em;align-items:center;margin-bottom:.4em;flex-wrap:wrap' },
+          el('b', { text: p.label || p.name }), badge((function (n) { var m = n % 10, h = n % 100, w = m === 1 && h !== 11 ? 'плейлист' : m >= 2 && m <= 4 && (h < 12 || h > 14) ? 'плейлиста' : 'плейлистов'; return n + ' ' + w; })(p.subs || 0)),
+          p.name === current ? badge('в ленте') : el('button', { text: 'В ленту', onclick: function () {
+            api('/home/profiles/me/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vk_profile: p.name }) }).then(function (s) {
+              if (!s.ok) { toast('Не удалось выбрать набор'); return; }
+              toast('Лента: ' + (p.label || p.name)); load();
+            });
+          } }),
+          p.personal ? null : el('button', { text: 'Удалить набор', onclick: function () {
+            if (!confirm('Удалить набор «' + (p.label || p.name) + '» вместе с плейлистами?')) return;
+            api('/vk/profiles/remove?name=' + encodeURIComponent(p.name)).then(function (x) {
+              if (!x.ok) { toast('Набор не удалён'); return; }
+              toast('Набор удалён'); load();
+            });
+          } }));
+        var list = el('div', { style: 'display:flex;flex-wrap:wrap;gap:.35em;margin:.3em 0' });
+        var input = el('input', { type: 'text', placeholder: 'Ссылка vkvideo.ru или -123_45', maxlength: '300', style: 'width:100%;box-sizing:border-box' });
+        var add = el('button', { class: 'primary', text: 'Добавить плейлист', onclick: function () {
+          var raw = input.value.trim();
+          if (!raw) return;
+          add.disabled = true;
+          api('/vk/subs/add?profile=' + encodeURIComponent(p.name), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: raw }) }).then(function (s) {
+            add.disabled = false;
+            if (!s.ok) { toast('Плейлист не добавлен'); return; }
+            input.value = ''; toast('Плейлист сохранён'); load();
+          }).catch(function () { add.disabled = false; toast('Плейлист не добавлен'); });
+        } });
+        api('/vk/subs?profile=' + encodeURIComponent(p.name)).then(function (s) {
+          var albums = (s.json && s.json.albums) || [];
+          if (!albums.length) list.appendChild(el('span', { class: 'muted', text: 'Плейлистов пока нет' }));
+          albums.forEach(function (a) {
+            list.appendChild(el('span', { class: 'badge', style: 'cursor:pointer', title: 'Убрать плейлист', text: (a.title || a.id) + ' ✕', onclick: function () {
+              api('/vk/subs/remove?profile=' + encodeURIComponent(p.name) + '&id=' + encodeURIComponent(a.id), { method: 'POST' }).then(function () { load(); });
+            } }));
+          });
+        });
+        wrap.appendChild(head); wrap.appendChild(list); wrap.appendChild(input); wrap.appendChild(el('div', { style: 'margin-top:.4em' }, add));
+        box.appendChild(wrap);
+      });
+      var nm = el('input', { type: 'text', placeholder: 'Имя нового набора', style: 'margin-right:.5em' });
+      box.appendChild(el('div', { class: 'row', style: 'margin-top:.7em' }, nm, el('button', { class: 'primary', text: 'Создать набор', onclick: function () {
+        var v = nm.value.trim();
+        if (!v) return;
+        api('/vk/profiles?add=' + encodeURIComponent(v)).then(function (s) {
+          if (s.ok) { toast('Набор создан'); load(); }
+          else toast('Имя: от 1 до 32 символов, без знаков / ? & # :');
+        });
+      } })));
+    }).catch(function () { box.appendChild(el('p', { text: 'Наборы не прочитаны.' })); });
+  }
+
   function renderYt(box, d) {
     box.appendChild(el('div', { class: 'sub', text: 'Набор каналов текущего зрителя. У «Основного» можно завести несколько. Детский профиль в режиме выбранных каналов берёт только разрешённый список.' }));
     var profs = (d && d.profiles) || [];
@@ -750,6 +887,7 @@
       var kinoBox = sec('Кинопаб', 'привязка и профили'); renderKino(kinoBox, kpProfiles);
       renderImport(sec('Закладки Кинопаба', 'импорт в «Мои фильмы»'), J(11));
       var youtubeBox = sec('YouTube', 'профили и каналы'); renderYt(youtubeBox, J(12));
+      renderVk(sec('VK', 'наборы плейлистов'));
       var proxyTargets = {};
       [['tmdb_api',opsBox],['tmdb_images',opsBox],['jacred',opsBox],['kinopub',kinoBox],['youtube',youtubeBox],['rollback',opsBox]].forEach(function (p) { proxyTargets[p[0]] = el('div'); p[1].appendChild(proxyTargets[p[0]]); });
       api('/home/admin/proxy').then(function (p) { if (document.body.contains(opsBox)) renderProxy(proxyTargets, p.ok ? p.json : null); })
@@ -758,6 +896,8 @@
       renderYm(sec('Яндекс.Музыка', 'привязка'), J(4));
       renderLocal(sec('Локальная библиотека', 'Plex и папки'), J(5), J(6));
       renderTv(sec('Телевидение', 'Channel Manager'), J(7), J(8));
+      renderWeather(sec('Погода', 'город для часов'));
+      renderWake(sec('Пробуждение', 'оболочка после сна'));
       renderAnime(sec('Аниме онлайн', 'источники'), J(9));
       renderAppLog(sec('Журнал запусков приложений', 'почему приложение могло не открыться', 'wide'), J(10));
       renderWalls(sec('Обои', 'папка database/wallpapers', 'wide'));

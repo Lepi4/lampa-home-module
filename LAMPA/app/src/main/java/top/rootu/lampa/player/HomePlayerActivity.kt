@@ -1,5 +1,6 @@
 package top.rootu.lampa.player
 
+import top.rootu.lampa.ProfileRuntime
 import top.rootu.lampa.R
 import android.app.Activity
 import android.app.AlertDialog
@@ -194,6 +195,7 @@ class HomePlayerActivity : Activity() {
     private var audioKey = ""
     private val startupAt = android.os.SystemClock.elapsedRealtime()
     private var homeBase = ""
+    private var frameClock: FrameClock? = null
     @Volatile private var homeOwner: JSONObject? = null
     private fun homeConnection(url: String): HttpURLConnection {
         val c=URL(url).openConnection() as HttpURLConnection
@@ -460,6 +462,7 @@ class HomePlayerActivity : Activity() {
             finish()
             return
         }
+        if (intent.getBooleanExtra("live", false)) top.rootu.lampa.WakeTrace.mark("player")
         buildUi()
         frameRate = PlaybackFrameRateController(this)
         frameRate.onOutputChanged = {
@@ -928,6 +931,10 @@ class HomePlayerActivity : Activity() {
         root.addView(spinner, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER))
 
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        frameClock = FrameClock(this, homeBase) { connection ->
+            if (homeBase.isNotBlank()) ProfileRuntime.requestHeaders(homeOwner).forEach { (k, v) -> connection.setRequestProperty(k, v) }
+        }
+        frameClock?.mount(root)
         seekHint = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 24f
@@ -2547,6 +2554,7 @@ class HomePlayerActivity : Activity() {
     override fun onDestroy() {
         ytRefreshEpoch++
         ytRefreshConnection?.disconnect()
+        frameClock?.stop()
         ui.removeCallbacksAndMessages(null)
         if (top.rootu.lampa.RemindWatcher.videoPlayer?.get() === this) top.rootu.lampa.RemindWatcher.videoPlayer = null
         if (::player.isInitialized && !finished) player.release()

@@ -55,7 +55,7 @@ public static class DeviceStore
 {
     static readonly Regex idRx = new("^[0-9A-Za-z_-]{3,40}$");
     // допустимые настройки устройства: ключ → (проверка значения)
-    public static readonly string[] Keys = { "maxh", "saver", "wall", "hidel", "auto", "engine", "buf", "font", "alpha", "afr", "kpprof", "viewer", "mc_yt", "mc_wr", "mc_ym", "mc_src", "ytprof", "mc_auto", "mc_info", "vodbuf", "mc_top", "mc_topnew", "mc_toprate", "version", "mc_clock" };
+    public static readonly string[] Keys = { "maxh", "saver", "wall", "hidel", "auto", "engine", "buf", "font", "alpha", "afr", "kpprof", "viewer", "mc_yt", "mc_vk", "mc_wr", "mc_ym", "mc_src", "ytprof", "mc_auto", "mc_info", "vodbuf", "mc_top", "mc_topnew", "mc_toprate", "version", "mc_clock" };
 
     public static bool ValidId(string id) => !string.IsNullOrEmpty(id) && idRx.IsMatch(id);
 
@@ -531,6 +531,7 @@ public class PanelController : BaseController
         string ytPack = string.IsNullOrEmpty((string)cfg["ytprof"]) ? "main" : (string)cfg["ytprof"];
         if (Profiles.Enabled && Profiles.Current != null) { YtStore.AdoptDeviceChoice(ytPack); ytPack = YtStore.ResolvePack(null); }
         if (On("mc_yt", true) && ProfilePolicy.SourceEnabled("youtube")) rows.Add(Row("youtube", "YouTube · подписки", $"/yt/feed?n=30&profile={Uri.EscapeDataString(ytPack)}", "wide"));
+        if (On("mc_vk", true) && ProfilePolicy.SourceEnabled("vk")) rows.Add(Row("vk", "VK · плейлисты", "/vk/feed?n=30", "wide"));
         rows.Add(Row("my_movies", "Мои фильмы", P("my_movies"), "poster"));
         var allRows=(JArray)rows.DeepClone();
         if(Profiles.Enabled){

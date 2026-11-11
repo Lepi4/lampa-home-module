@@ -536,6 +536,7 @@ class MainActivity : BaseActivity(),
         if (BuildConfig.APPLICATION_ID.endsWith(".mc") && !fromPlayer && away > 2 * 60 * 1000L && TvLaunch.channel < 0) {
             Log.i(TAG, "после сна ${away / 1000} с показываем лаунчер")
             mcHost?.show()
+            mcHost?.noteWake(away / 1000)
         }
         if (!fromPlayer && away > 5 * 60 * 1000L && browserInitComplete && !BuildConfig.APPLICATION_ID.endsWith(".mc")) {
             Log.i(TAG, "WakeStart: приложение было на заднем плане ${away / 1000} с — автозапуск ТВ")

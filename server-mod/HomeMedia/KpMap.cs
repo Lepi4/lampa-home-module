@@ -506,7 +506,7 @@ public class KinoPubCardsController : BaseController
             }, async candidates =>
             {
                 if (mode != "top_new") await Availability.Filter(candidates, (mode == "new_movie" || mode == "new_cartoon" || mode == "ru_movie") ? "movie" : "tv", null, Prof(), 400);
-            });
+            }, fill: true);
             await CardQuality.Enrich(filled.results);
             ReleasePolicy.DropBlocked(filled.results);
             return (filled.results, filled.more);
@@ -533,7 +533,8 @@ public class KinoPubCardsController : BaseController
         var seen = new HashSet<string>();
         bool sourceMore = false;
         bool stoppedEarly = false;
-        var deadline = DateTime.UtcNow.AddSeconds(personal ? 4 : 6);
+        bool childCatalog = Profiles.Current?.Child == true && ProfileCatalogPages.Supports(mode);
+        var deadline = DateTime.UtcNow.AddSeconds(personal ? 4 : childCatalog ? 20 : 6);
         try
         {
             for (int p = 1; p <= 8 && acc.Count < want; p++)
@@ -640,11 +641,30 @@ public class KinoPubCardsController : BaseController
                 else r = await LoadPublicSource();
                 if(Profiles.Current?.Child==true)
                 {
-                    var cards = r.results.Children<JObject>().Where(card => !catalogScan || Availability.HasRu(card));
+                    var cards = r.results.Children<JObject>().Where(card => !catalogScan || Availability.HasRu(card)).ToList();
                     var kept = new List<JObject>();
+                    var wait = new List<JObject>();
                     foreach (var card in cards)
-                        if (ProfilePolicy.Classify(card, enqueue: true) == ProfilePolicy.AgeDecision.Allow)
-                            kept.Add(card);
+                    {
+                        var decision = ProfilePolicy.Classify(card, enqueue: !catalogScan);
+                        if (decision == ProfilePolicy.AgeDecision.Allow) kept.Add(card);
+                        else if (catalogScan && decision == ProfilePolicy.AgeDecision.Pending) wait.Add(card);
+                    }
+                    // Возраст ещё не известен: в этой же загрузке ленты его узнаём, а не оставляем одну уже проверенную карточку.
+                    if (wait.Count > 0)
+                    {
+                        using var ageBudget = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                        var work = wait.Select(async card =>
+                        {
+                            try
+                            {
+                                if (await ProfilePolicy.Allows(card).WaitAsync(ageBudget.Token))
+                                    lock (kept) kept.Add(card);
+                            }
+                            catch { }
+                        });
+                        try { await Task.WhenAll(work); } catch { }
+                    }
                     r.results = new JArray(kept);
                 }
                 // русское название и русская озвучка (kino.pub или живая раздача); библиотеку Plex не трогаем

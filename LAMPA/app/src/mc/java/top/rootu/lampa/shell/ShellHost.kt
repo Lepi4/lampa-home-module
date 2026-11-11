@@ -20,6 +20,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import top.rootu.lampa.WakeTrace
 import top.rootu.lampa.player.DLog
 import org.json.JSONArray
 import org.json.JSONObject
@@ -69,7 +70,7 @@ class ShellHost(private val a: MainActivity) : McHostApi {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
         web.settings.userAgentString = web.settings.userAgentString + " McShell"     // сервер по этой метке отличает оболочку от чужих страниц
         web.webChromeClient = WebChromeClient()
-        web.webViewClient = WebViewClient()
+        web.webViewClient = shellClient
         web.addJavascriptInterface(Bridge(), "MC")
         a.addContentView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         web.loadUrl("file:///android_asset/shell/index.html")
@@ -77,6 +78,102 @@ class ShellHost(private val a: MainActivity) : McHostApi {
     }
 
     private var hiddenAt = 0L
+    private var rendererGone = false
+    @Volatile private var wakeAttempt: String? = null
+    @Volatile private var wakeAckSent = false
+    private var wakeReloadAt = 0L
+    private var lastShellReloadAt = 0L
+
+    private val shellClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+            if (destroyed || view == null || view !== web) return
+            val id = wakeAttempt
+            if (id != null && !wakeAckSent) {
+                val q = org.json.JSONObject.quote(id)
+                try { view.evaluateJavascript("try{MC.shellAck($q,!!(window.__mc&&window.__mc.resume))}catch(e){}", null) } catch (_: Exception) {}
+            }
+            if (shown) view.requestFocus()
+        }
+
+        override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+            rendererGone = true
+            ui.post { if (!destroyed && view === web) replaceWeb() }
+            return true
+        }
+    }
+
+    // Процесс отрисовки умер: старую страницу не обновляем, тот же мост вешается на новый WebView.
+    private fun replaceWeb() {
+        val old = if (this::web.isInitialized) web else null
+        val parent = old?.parent as? ViewGroup
+        if (old != null) {
+            parent?.removeView(old)
+            try { old.destroy() } catch (_: Exception) {}
+        }
+        rendererGone = false
+        web = WebView(a)
+        web.setBackgroundColor(Color.BLACK)
+        web.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = true
+            @Suppress("DEPRECATION") allowUniversalAccessFromFileURLs = true
+            @Suppress("DEPRECATION") allowFileAccessFromFileURLs = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            cacheMode = WebSettings.LOAD_NO_CACHE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+        web.settings.userAgentString = web.settings.userAgentString + " McShell"
+        web.webChromeClient = WebChromeClient()
+        web.webViewClient = shellClient
+        web.addJavascriptInterface(Bridge(), "MC")
+        val lp = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        if (parent != null) parent.addView(web, lp) else a.addContentView(web, lp)
+        if (!shown) web.visibility = View.GONE
+        web.loadUrl("file:///android_asset/shell/index.html")
+    }
+
+    private fun deviceId(): String {
+        val sp = a.getSharedPreferences("mc", Context.MODE_PRIVATE)
+        var id = sp.getString("dev", null)
+        if (id == null) {
+            id = "mc" + UUID.randomUUID().toString().replace("-", "").substring(0, 12)
+            sp.edit().putString("dev", id).apply()
+        }
+        return id!!
+    }
+
+    // Сон дольше 30 с и оболочка уже на экране. Документ Lampa и плеер не трогаем. Повтор — не раньше минуты.
+    private fun softReload(awaySec: Long) {
+        if (awaySec <= 30 || destroyed) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastShellReloadAt < 60_000L) return
+        lastShellReloadAt = now
+        wakeAckSent = false
+        wakeReloadAt = now
+        val id = UUID.randomUUID().toString().replace("-", "").substring(0, 12)
+        wakeAttempt = id
+        WakeTrace.begin(id, a.appUrl, deviceId(), awaySec)
+        ui.post {
+            if (destroyed) return@post
+            if (rendererGone || !this::web.isInitialized) replaceWeb()
+            else {
+                try {
+                    web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+                    web.loadUrl("file:///android_asset/shell/index.html")
+                    web.requestFocus()
+                } catch (_: Exception) { replaceWeb() }
+            }
+        }
+        ui.postDelayed({
+            if (wakeAttempt == id && !wakeAckSent) {
+                wakeAckSent = true
+                WakeTrace.mark("ack", -1, 0)
+            }
+        }, 8_000)
+    }
+
+    override fun noteWake(awaySec: Long) { softReload(awaySec) }
 
     override fun show() {
         MainActivity.mcShellHidden = false
@@ -89,7 +186,8 @@ class ShellHost(private val a: MainActivity) : McHostApi {
             web.requestFocus()
             try { web.resumeTimers() } catch (_: Exception) {}
             // вернулись на оболочку после Lampa/плеера: пусть обновит ленты («Продолжить», «Мои сериалы»)
-            if (!was && hiddenAt > 0) js("window.__mc && window.__mc.resume && window.__mc.resume(${(android.os.SystemClock.elapsedRealtime() - hiddenAt) / 1000})")
+            if (!was && hiddenAt > 0 && android.os.SystemClock.elapsedRealtime() - lastShellReloadAt > 2_000)
+                js("window.__mc && window.__mc.resume && window.__mc.resume(${(android.os.SystemClock.elapsedRealtime() - hiddenAt) / 1000})")
         }
     }
 
@@ -161,7 +259,8 @@ class ShellHost(private val a: MainActivity) : McHostApi {
         val away = if (pausedAt > 0) (android.os.SystemClock.elapsedRealtime() - pausedAt) / 1000 else 0L
         try { web.resumeTimers() } catch (_: Exception) {}
         ui.removeCallbacks(watchdog); ui.postDelayed(watchdog, 20_000)
-        if (shown) js("window.__mc && window.__mc.resume && window.__mc.resume($away)")
+        if (shown && away > 30) softReload(away)
+        else if (shown) js("window.__mc && window.__mc.resume && window.__mc.resume($away)")
     }
 
     override fun onPause() {
@@ -240,14 +339,13 @@ class ShellHost(private val a: MainActivity) : McHostApi {
         @JavascriptInterface fun setServer(url: String) { val u = url.trim().trimEnd('/'); if (u != a.appUrl) top.rootu.lampa.ProfileRuntime.resetServer(); a.appUrl = u; a.mcServerChanged(u) }
 
         // постоянный идентификатор этого устройства для записи на сервере
-        @JavascriptInterface fun deviceId(): String {
-            val sp = a.getSharedPreferences("mc", Context.MODE_PRIVATE)
-            var id = sp.getString("dev", null)
-            if (id == null) {
-                id = "mc" + UUID.randomUUID().toString().replace("-", "").substring(0, 12)
-                sp.edit().putString("dev", id).apply()
-            }
-            return id!!
+        @JavascriptInterface fun deviceId(): String = this@ShellHost.deviceId()
+
+        @JavascriptInterface fun shellAck(attempt: String, alive: Boolean) {
+            if (attempt != wakeAttempt || wakeAckSent) return
+            wakeAckSent = true
+            val ms = (android.os.SystemClock.elapsedRealtime() - wakeReloadAt).coerceIn(0, 60_000)
+            WakeTrace.mark("ack", ms, if (alive) 1 else 0)
         }
 
         @JavascriptInterface fun deviceName(): String = Build.MODEL ?: "Android"
@@ -315,20 +413,24 @@ class ShellHost(private val a: MainActivity) : McHostApi {
 
         // Список приложений: [{p: пакет, l: название}]
         @JavascriptInterface fun apps(): String {
-            val pm = a.packageManager
-            val out = JSONArray()
-            val seen = HashSet<String>()
-            fun add(cat: String) {
-                val i = Intent(Intent.ACTION_MAIN).addCategory(cat)
-                for (ri in pm.queryIntentActivities(i, 0)) {
-                    val p = ri.activityInfo.packageName
-                    if (p == a.packageName || !seen.add(p)) continue
-                    out.put(JSONObject().put("p", p).put("l", ri.loadLabel(pm).toString()))
+            return try {
+                val pm = a.packageManager
+                val out = JSONArray()
+                val seen = HashSet<String>()
+                fun add(cat: String) {
+                    val i = Intent(Intent.ACTION_MAIN).addCategory(cat)
+                    for (ri in pm.queryIntentActivities(i, 0)) {
+                        try {
+                            val p = ri.activityInfo.packageName
+                            if (p == a.packageName || !seen.add(p)) continue
+                            out.put(JSONObject().put("p", p).put("l", ri.loadLabel(pm).toString()))
+                        } catch (_: Exception) {}
+                    }
                 }
-            }
-            add(Intent.CATEGORY_LEANBACK_LAUNCHER)
-            add(Intent.CATEGORY_LAUNCHER)
-            return out.toString()
+                add(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                add(Intent.CATEGORY_LAUNCHER)
+                out.toString()
+            } catch (_: Exception) { "[]" }
         }
 
         // Иконка приложения: PNG 96 пикселей в base64 (с кэшем)
@@ -356,6 +458,7 @@ class ShellHost(private val a: MainActivity) : McHostApi {
 
         // «ТВ»: тот же вход, что у автоматизации (TvLaunchActivity включает эфир на последнем канале)
         @JavascriptInterface fun tv() {
+            WakeTrace.mark("tv")
             a.runOnUiThread { try { a.startActivity(Intent("app.lampac.home.action.TV").setPackage(a.packageName)) } catch (_: Exception) {} }
         }
 

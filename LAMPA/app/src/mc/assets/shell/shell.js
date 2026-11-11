@@ -167,14 +167,64 @@
     try { cached = localStorage.getItem(clockCacheKey()) || ''; } catch (e) {}
     var raw = (state.dev || {}).mc_clock;
     var show = String(raw == null ? (cached === '0' ? '0' : '1') : raw) !== '0';
+    var side = $('side');
+    if (side) side.style.visibility = show ? '' : 'hidden';
     clock.style.display = show ? '' : 'none';
     if (!show) { if (clockTimer !== null) clearInterval(clockTimer); clockTimer = null; return; }
     function paint() {
       var d = new Date();
       clock.textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+      paintWeather();
+      if (side && side._minute !== d.getMinutes()) {
+        side._minute = d.getMinutes();
+        if (d.getMinutes() % 3 === 0) wobble(side);
+      }
     }
     paint();
     if (clockTimer === null) clockTimer = setInterval(paint, 10000);
+  }
+  function weatherNight(when) {
+    var h = (when || new Date()).getHours();
+    return h < 6 || h >= 18;
+  }
+  function weatherMark(kind, when) {
+    var night = weatherNight(when);
+    if (kind === 'clear') return night ? '\u263E' : '\u2600';
+    if (kind === 'partly') return night ? '\u263E\u2601' : '\u26C5';
+    if (kind === 'cloudy') return night ? '\u263E\u2601' : '\u2601';
+    if (kind === 'rain') return '\u2602';
+    if (kind === 'snow') return '\u2744';
+    if (kind === 'storm') return '\u26A1';
+    return '\u25CF';
+  }
+  function weatherText(d) {
+    if (!d || d.weather !== true || d.temp == null || isNaN(Number(d.temp))) return '';
+    var t = Math.round(Number(d.temp));
+    return weatherMark(d.condition) + ' ' + ((t > 0 ? '+' : '') + t + '\u00B0');
+  }
+  function wobble(node) {
+    node.style.transition = 'transform .35s ease';
+    node.style.transform = 'rotate(4deg)';
+    setTimeout(function () {
+      node.style.transition = 'transform .5s ease';
+      node.style.transform = 'rotate(-4deg)';
+      setTimeout(function () {
+        node.style.transition = 'transform .35s ease';
+        node.style.transform = 'rotate(0deg)';
+      }, 500);
+    }, 350);
+  }
+  var weatherNow = null;
+  function paintWeather() {
+    var node = $('weather');
+    if (!node) return;
+    var text = weatherText(weatherNow);
+    node.textContent = text;
+    node.style.display = text ? '' : 'none';
+  }
+  function loadWeather() {
+    if (!$('weather') || !state.server) return;
+    api('/home/weather', function (d) { weatherNow = d; paintWeather(); }, function () {});
   }
   try { applyClock(); } catch (e) {}
   // остаток подписки Кинопаба: нет аккаунта — не показываем; 0 дней — «истекла»
@@ -380,6 +430,19 @@
         writeApi('/home/history/hide',{card:it.history_card},function(d){if(!d.ok){toast('Не удалось изменить историю');return;}
           menuClose();dropCard(e,rowId);state.mem={};state.lastLoad=0;loadRows();});
       }],['Назад',null,menuClose]]);return;
+    }
+    if (rowId === 'vk') {
+      menuShow(title, [
+        ['Открыть', null, function () { menuClose(); e._act(); }],
+        ['Просмотрено', null, function () {
+          writeApi('/vk/seen?id=' + encodeURIComponent(it.id) + '&on=1', {}, function (d) {
+            if (d.error) { toast('Не удалось сохранить отметку'); return; }
+            menuClose(); dropCard(e, rowId); toast('Просмотрено');
+          });
+        }],
+        ['Закрыть', null, menuClose]
+      ]);
+      return;
     }
     if (rowId === 'youtube') {
       var cid = it.channel_id, ent = [['Открыть видео', null, function () { menuClose(); e._act(); }]];
@@ -619,7 +682,7 @@
     { id: 'new_movie', title: 'Новые фильмы', style: 'poster' }, { id: 'new_serial', title: 'Новые сериалы', style: 'poster' },
     { id: 'watching_anime', title: 'Мои аниме', style: 'poster' }, { id: 'anime', title: 'Аниме', style: 'poster' },
     { id: 'ru_serial', title: 'Отечественные сериалы', style: 'poster' }, { id: 'ru_movie', title: 'Отечественные фильмы', style: 'poster' },
-    { id: 'new_cartoon', title: 'Мультфильмы', style: 'poster' }, { id: 'youtube', title: 'YouTube · подписки', style: 'wide' }, { id: 'my_movies', title: 'Мои фильмы', style: 'poster' }
+    { id: 'new_cartoon', title: 'Мультфильмы', style: 'poster' }, { id: 'youtube', title: 'YouTube · подписки', style: 'wide' }, { id: 'vk', title: 'VK · плейлисты', style: 'wide' }, { id: 'my_movies', title: 'Мои фильмы', style: 'poster' }
   ];
 
   var MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -659,10 +722,12 @@
 
   function cardEl(item, row) {
     var yt = row.id === 'youtube' || item.provider === 'youtube';
+    var vk = row.id === 'vk' || item.provider === 'vk';
     var c = el('div', 'card ' + row.style);
     var img = document.createElement('img'); img.alt = ''; img.decoding = 'async';
     var src = '';
     if (yt) src = item.thumb ? state.server + '/yt/p?u=' + b64url(item.thumb) : '';
+    else if (vk) src = item.thumb ? state.server + '/vk/p?u=' + b64url(item.thumb) : '';
     else if (item.wrestling || item.kp_legacy) src = item.img || '';
     else if (row.style === 'wide') { var bp = item.backdrop_path || item.poster_path; src = bp ? state.server + '/tmdb/img/t/p/w500' + bp : ''; }
     else src = item.poster_path ? state.server + '/tmdb/img/t/p/w342' + item.poster_path : '';
@@ -671,7 +736,7 @@
     var title = item.title || item.name || '';
     c.appendChild(el('div', 'ttl', title));
     if(item.history_episode)pic.appendChild(el('div','hist',item.history_episode));
-    if (yt) {
+    if (yt || vk) {
       var d = item.published ? dateLabel(item.published) : (item.ago || '');
       if (d) pic.appendChild(el('div', 'dt', d));
       var dur = fmtDur(item.duration); if (dur) pic.appendChild(el('div', 'dur', dur));
@@ -688,7 +753,14 @@
       if (!q && !item.wrestling && !item.kp_legacy) needQuality(item, c, isTv);
     }
     c._act = function () {
-      if (yt) {
+      if (vk && item.vk_album) {
+        var open = '(function(a,b){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__vk&&window.__vk.openAlbum){clearInterval(t);window.__vk.openAlbum(a,b)}else if(++n<=80)t=setTimeout(run,100)}run()})';
+        lampaGo(JSON.stringify({ js: open, arg: JSON.stringify(item.vk_album) + ',' + JSON.stringify(title), keep: false }));
+      } else if (vk) {
+        var play = '(function(a,b){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__vk&&window.__vk.play){clearInterval(t);window.__vk.play(a,b)}else if(++n<=80)t=setTimeout(run,100)}run()})';
+        toast('Запускаю ролик…');
+        lampaGo(JSON.stringify({ js: play, arg: JSON.stringify(item.id) + ',' + JSON.stringify(title), keep: true }));
+      } else if (yt) {
         var fn = '(function(a,b){var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__yt){clearInterval(t);window.__yt.play(a,b)}else if(++n<=80)t=setTimeout(run,100)}run()})';
         toast('Запускаю ролик…');
         lampaGo(JSON.stringify({ js: fn, arg: JSON.stringify(item.id) + ',' + JSON.stringify(title), keep: true }));
@@ -793,11 +865,13 @@
     c.appendChild(el('div', 'ttl', 'Смотреть все'));
     c._all = true;
     c._act = function () {
-      var yt = row.id === 'youtube';
+      var yt = row.id === 'youtube', vk = row.id === 'vk';
       var fn = yt
         ? '(function(){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__yt&&window.__yt.feed){clearInterval(t);window.__yt.feed()}else if(++n<=80)t=setTimeout(run,100)}run()})'
+        : vk
+        ? '(function(){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__vk&&window.__vk.feed){clearInterval(t);window.__vk.feed()}else if(++n<=80)t=setTimeout(run,100)}run()})'
         : '(function(a,b){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__kp_section){clearInterval(t);window.__kp_section(a,b)}else if(++n<=80)t=setTimeout(run,100)}run()})';
-      lampaGo(JSON.stringify({ js: fn, arg: yt ? '' : JSON.stringify(row.title) + ',' + JSON.stringify(row.id), keep: false }));
+      lampaGo(JSON.stringify({ js: fn, arg: yt || vk ? '' : JSON.stringify(row.title) + ',' + JSON.stringify(row.id), keep: false }));
     };
     return c;
   }
@@ -807,6 +881,7 @@
     if (!items || !items.length) {
       if (!fromCache || row.id === 'youtube') releasePosters(strip);
       if (row.id === 'youtube') { strip.innerHTML = ''; strip.appendChild(el('div', 'empty', 'Каналов пока нет: добавьте их в веб-панели сервера (раздел YouTube)')); box.classList.remove('hidden'); }
+      else if (row.id === 'vk') { strip.innerHTML = ''; strip.appendChild(el('div', 'empty', 'Непросмотренных роликов нет')); box.classList.remove('hidden'); }
       else if (!fromCache) { strip.innerHTML = ''; box.classList.add('hidden'); }
       row._sig = ''; rebuildNav(); return;
     }
@@ -885,6 +960,36 @@
     if (!(userContext && userContext.profile.is_child)) sys('Настройки', '⚙', function () { MC.settings(); });
     sys('Добавить', '＋', function () { openPicker(true); });
     refreshMyChannels();
+    refreshMyVk();
+    // Первый запрос к системе иногда отдаёт не все пакеты. Добираем ряд, пока не появятся закреплённые.
+    var pins = pinnedList(), missing = pins.filter(function (pk) { return !byPkg[pk]; });
+    if (missing.length && !state.setupOpen && !state.move) watchApps(pins, byPkg);
+  }
+
+  var appsWatch = 0;
+  function watchApps(pins, known) {
+    if (appsWatch >= 5 || state.setupOpen || state.move) return;
+    var step = appsWatch++;
+    setTimeout(function () {
+      if (state.setupOpen || state.move) return;
+      var next = [];
+      try { next = JSON.parse(MC.apps()) || []; } catch (e) { next = []; }
+      var by = {};
+      next.forEach(function (a) { by[a.p] = 1; });
+      var appeared = pins.some(function (pk) { return !known[pk] && by[pk]; });
+      if (appeared || next.length > ALL_APPS.length) {
+        var focus = document.querySelector('.focus');
+        var pkg = focus && focus._pkg;
+        var keep = focus && focus.isConnected && !focus.classList.contains('app');
+        buildApps();
+        if (pkg) {
+          var tiles = [].slice.call(document.querySelectorAll('#apps .app'));
+          var at = 0;
+          tiles.forEach(function (t, i) { if (t._pkg === pkg) at = i; });
+          for (var i = 0; i < state.nav.length; i++) if (state.nav[i].id === 'apps') { setFocus(i, at, true); break; }
+        } else if (keep) focus.classList.add('focus');
+      } else if (pins.some(function (pk) { return !by[pk]; })) watchApps(pins, known);
+    }, [400, 900, 1600, 2800, 4500][step] || 4500);
   }
 
   function refreshMyChannels() {
@@ -913,6 +1018,36 @@
     if(!enabled){paint(false);return;}
     var pack=ytPackName();
     api('/yt/subs?profile='+encodeURIComponent(pack),function(d){paint((d.channels||[]).length>0);},function(){},10000);
+  }
+
+  function refreshMyVk() {
+    var box = $('apps'), strip = box && box.querySelector('.strip');
+    if (!strip) return;
+    var child = userContext && userContext.profile && userContext.profile.is_child;
+    var allowed = !child && !(state.sources && state.sources.vk === false);
+    var on = String((state.dev || {}).mc_vk != null ? state.dev.mc_vk : '1') !== '0' && allowed;
+    var focused = document.querySelector('#apps .app.focus');
+    function nav() {
+      rebuildNav();
+      if (!focused) return;
+      for (var i = 0; i < state.nav.length; i++) if (state.nav[i].id === 'apps') {
+        var at = state.nav[i].items.indexOf(focused);
+        if (at >= 0) { state.r = i; state.c = at; }
+        else setFocus(i, Math.min(state.c, state.nav[i].items.length - 1), true);
+      }
+    }
+    var tile = strip.querySelector('.my-vk');
+    if (!on) { if (tile) { strip.removeChild(tile); nav(); } return; }
+    if (tile) return;
+    tile = el('div', 'app sys my-vk');
+    tile.appendChild(el('div', 'glyph', '▶'));
+    tile.appendChild(el('span', null, 'Мой VK'));
+    tile._act = function () {
+      lampaGo(JSON.stringify({ js: '(function(){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__vk&&window.__vk.open){clearInterval(t);window.__vk.open()}else if(++n<=80)t=setTimeout(run,100)}run()})', arg: '', keep: false }));
+    };
+    var anchor = strip.querySelector('.app-picker');
+    strip.insertBefore(tile, anchor ? anchor.nextSibling : null);
+    nav();
   }
 
   // окно выбора: все приложения (запуск) или закрепление в ряду (Enter включает/выключает)
@@ -984,6 +1119,12 @@
             withWrestling(r, items, function (all) {
               if (gen !== state.gen) return;           // ответ вложенного запроса устарел: ни кэш, ни экран не трогаем
               var more = d.has_more === true;
+              if (all.length > 0 && all.length < 12 && more && !r._shortRetry) {
+                r._shortRetry = true;
+                save(rowKey(r.id, sv, pf), all.slice(0, 24)); fillRow(r, all, false);
+                queue.push(r); next();
+                return;
+              }
               if (!all.length && more) {
                 r._emptyTries = (r._emptyTries || 0) + 1;
                 if (r._emptyTries <= 4) {
@@ -1012,7 +1153,7 @@
     if (!ensureUser()) return;
     seedLampa();
     state.dev = load('mc_dev', {}); syncAfr(); applyWall();
-    buildBar(); buildApps();
+    buildBar(); buildApps(); loadWeather();
     var cached = load('mc_cfg', null) || DEFAULT_ROWS.map(function (r) { return { id: r.id, title: r.title, style: r.style, url: '' }; });
     var local = cached.map(function (r) { return { id: r.id, title: r.title, style: r.style, url: r.url }; });
     buildRows(local);
@@ -1024,6 +1165,7 @@
       syncAfr(); applyWall(); inheritWall(); applyClock();
       state.sources=c.sources||{};state.allRows=c.all_rows||c.rows||[];
       refreshMyChannels();
+      refreshMyVk();
       var rows = (c.rows || []).map(function (r) { return { id: r.id, title: r.title, style: r.style, url: r.url }; });
       save('mc_cfg', rows);
       var same = sig(rows) === sig(state.cfg);
@@ -1039,7 +1181,7 @@
   }
 
   // обновления: периодически и при возвращении на экран; ленты меняются по месту
-  setInterval(function () { if(!state.setupOpen&&refreshUserPolicy())return; if(!state.setupOpen&&state.server)refreshMyChannels(); if (!state.setupOpen && state.server && Date.now() - state.lastLoad > 5 * 60000) { state.lastLoad = Date.now(); loadRows(); } }, 60000);
+  setInterval(function () { if(!state.setupOpen&&refreshUserPolicy())return; if(!state.setupOpen&&state.server){refreshMyChannels();refreshMyVk();} if (!state.setupOpen && state.server && Date.now() - state.lastLoad > 5 * 60000) { state.lastLoad = Date.now(); loadRows(); } }, 60000);
 
   // ---------- настройки устройства (хранятся на сервере в записи устройства) ----------
   function applyWall() {
@@ -1080,6 +1222,7 @@
     mc_topnew: { t: 'Лучшие новинки: за период', d: '3', o: [['1', 'месяц'], ['3', '3 месяца'], ['12', 'год'], ['0', 'всё время']] },
     mc_toprate: { t: 'Лучшие новинки: рейтинг от', d: '7.9', o: [['7.0', '7.0'], ['7.5', '7.5'], ['7.9', '7.9'], ['8.2', '8.2'], ['8.5', '8.5']], hint: 'у российского производства порог на 0,9 ниже' },
     mc_yt: { t: 'Ряд YouTube', d: '1', o: [['1', 'показывать'], ['0', 'скрыть']] },
+    mc_vk: { t: 'Мой VK', d: '1', o: [['1', 'плитка в ряду приложений'], ['0', 'скрыть']], hint: 'плейлисты хранятся на сервере, в профиле зрителя' },
     mc_info: { t: 'Описание под постером', d: '1', o: [['1', 'показывать'], ['0', 'скрыть']], hint: 'название, год, жанры, сюжет выбранной карточки' },
     mc_clock: { t: 'Часы лаунчера', d: '1', o: [['1', 'показывать'], ['0', 'скрыть']] },
     saver: { t: 'Заставка Lampa', d: '0', o: [['0', 'выключена'], ['1', 'включена']] }
@@ -1193,7 +1336,32 @@
     row('Период новинок', 'Для всех профилей', function () { return '3 года; лучшие — 1 год'; }, null, function () {});
     opt('mc_toprate', function () { state.lastLoad = 0; });
     opt('mc_yt', function () { toast('Ряд обновится при возврате на главную'); state.lastLoad = 0; });
+    opt('mc_vk', function () { refreshMyVk(); rebuildNav(); });
     row('Профиль YouTube', 'Набор каналов этого профиля, не приставки', ytLabel, null, cycleYoutubeProfile);
+    function vkLabel() {
+      var n = userContext && userContext.profile && userContext.profile.settings && userContext.profile.settings.vk_profile;
+      if (!n || n.indexOf('vku_') === 0) return 'свой';
+      var parts = String(n).split(':'); return parts[parts.length - 1];
+    }
+    function saveVkProfile(name, paint) {
+      writeApi('/home/profiles/me/settings', { vk_profile: name }, function (r) {
+        if (r.error) { toast(r.error === 'bad_vk_profile' ? 'Такого набора VK нет' : 'Не удалось сохранить'); return; }
+        try { userContext = JSON.parse(MC.profileRefresh()); } catch (e) {}
+        if (paint) paint();
+        toast('VK: ' + vkLabel());
+        state.lastLoad = 0; startHome(true);
+      });
+    }
+    row('Профиль VK', 'Набор плейлистов этого зрителя', vkLabel, null, function (paint) {
+      api('/vk/profiles', function (d) {
+        var ps = d.profiles || []; if (!ps.length) { toast('Наборов VK пока нет'); return; }
+        var cur = (userContext.profile.settings || {}).vk_profile || '', i = -1;
+        ps.forEach(function (p, n) { if (p.name === cur) i = n; });
+        if (i < 0) ps.forEach(function (p, n) { if (p.personal) i = n; });
+        var nx = ps[(i + 1) % ps.length];
+        saveVkProfile(nx.name, paint);
+      });
+    });
     row('Обои', 'картинка с сервера на фоне', function () { return (state.dev || {}).wall || 'по умолчанию'; }, null, function (paint) {
       api('/home/wallpapers', function (d) {
         var fs = ['' ].concat(d.files || []), cur = (state.dev || {}).wall || '', i = Math.max(0, fs.indexOf(cur));
@@ -1247,7 +1415,7 @@
 
   // ---------- поиск: своя страница, Lampa не открывается; открывается только карточка выбранного ----------
   var lastQuery = '';
-  var SEARCH_CATEGORIES = [['movie', 'Фильмы'], ['cartoon_movie', 'Мультфильмы'], ['person', 'Люди'], ['tv', 'Сериалы'], ['cartoon_tv', 'Мультсериалы'], ['anime_movie', 'Аниме'], ['anime_tv', 'Аниме-сериалы'], ['yc', 'YouTube каналы'], ['yv', 'YouTube видео']];
+  var SEARCH_CATEGORIES = [['movie', 'Фильмы'], ['cartoon_movie', 'Мультфильмы'], ['person', 'Люди'], ['tv', 'Сериалы'], ['cartoon_tv', 'Мультсериалы'], ['anime_movie', 'Аниме'], ['anime_tv', 'Аниме-сериалы'], ['yc', 'YouTube каналы'], ['yv', 'YouTube видео'], ['vv', 'VK видео'], ['vp', 'VK плейлисты']];
   var PERIODS = [['', 'любой'], ['y1', 'этот год'], ['y3', 'последние 3 года'], ['y10', 'последние 10 лет'], ['d2020', '2020-е'], ['d2010', '2010-е'], ['d2000', '2000-е'], ['old', 'до 2000']];
   var COUNTRIES = [['all', 'все (без Индии и Турции)'], ['foreign', 'зарубежные'], ['ru', 'отечественные'], ['any', 'все, без исключений']];
   var RATINGS = [[0, 'любой'], [5, 'от 5'], [6, 'от 6'], [7, 'от 7'], [8, 'от 8']];
@@ -1257,14 +1425,24 @@
   function searchWithAlternative(path, q, category, request, ok, fail) {
     request(path, function (d) {
       var alternate = searchAlternative(q);
-      if (category !== 'yc' && category !== 'yv' && alternate !== q && d && Array.isArray(d.results) && !d.results.length && !d.next_page && !d.error) {
+      if (category !== 'yc' && category !== 'yv' && category !== 'vv' && category !== 'vp' && alternate !== q && d && Array.isArray(d.results) && !d.results.length && !d.next_page && !d.error) {
         var next = path.replace(/([?&])q=[^&]*/, function (_, sep) { return sep + 'q=' + encodeURIComponent(alternate); });
         return request(next, function (result) { ok(result, next); }, fail);
       }
       ok(d, path);
     }, fail);
   }
-  function searchCategories() { var cfg=userContext&&userContext.profile.settings||{};var on=cfg.youtube_mode!=='off'&&(!cfg.sources||cfg.sources.youtube!==false)&&(!state.sources||state.sources.youtube!==false);return SEARCH_CATEGORIES.filter(function(c){return on||c[0]!=='yc'&&c[0]!=='yv';}); }
+  function searchCategories() {
+    var cfg=userContext&&userContext.profile.settings||{};
+    var yt=cfg.youtube_mode!=='off'&&(!cfg.sources||cfg.sources.youtube!==false)&&(!state.sources||state.sources.youtube!==false);
+    var child=userContext&&userContext.profile&&userContext.profile.is_child;
+    var vk=!child&&!(state.sources&&state.sources.vk===false);
+    return SEARCH_CATEGORIES.filter(function(c){
+      if(c[0]==='yc'||c[0]==='yv')return yt;
+      if(c[0]==='vv'||c[0]==='vp')return vk;
+      return true;
+    });
+  }
   function searchMode() {
     var v = load('mc_smode', 'movie'), legacy = { everything: 'movie', all: 'movie', anime: 'anime_tv' };
     v = legacy[v] || v;
@@ -1329,7 +1507,7 @@
     var fCou = tile('Страна: ' + lab(COUNTRIES, sf.c), null, function () { var f = sfGet(); f.c = cyc(COUNTRIES, f.c); save('mc_sf', f); fCou.firstChild.textContent = 'Страна: ' + lab(COUNTRIES, f.c); last = ''; run(inp.value); });
     var fRat = tile('Рейтинг: ' + lab(RATINGS, sf.r), null, function () { var f = sfGet(); f.r = cyc(RATINGS, f.r); save('mc_sf', f); fRat.firstChild.textContent = 'Рейтинг: ' + lab(RATINGS, f.r); last = ''; run(inp.value); });
     fline.appendChild(fPer); fline.appendChild(fCou); fline.appendChild(fRat);
-    function filtersApply() { var c = searchMode(); return c !== 'person' && c !== 'yc' && c !== 'yv'; }
+    function filtersApply() { var c = searchMode(); return c !== 'person' && c !== 'yc' && c !== 'yv' && c !== 'vv' && c !== 'vp'; }
     function applyCategoryUi() { fline.style.display = filtersApply() ? '' : 'none'; }
 
     var info = el('p', 'sinfo', 'Введите запрос или нажмите «Голос»'); box.appendChild(info);
@@ -1367,6 +1545,8 @@
         if (cat === 'person') c = personCard(it);
         else if (cat === 'yc') { c = channelTile(it); }
         else if (cat === 'yv') { c = cardEl(cardOfYt(it), { id: 'youtube', style: 'wide' }); c._item = cardOfYt(it); }
+        else if (cat === 'vv') { c = cardEl(cardOfVk(it), { id: 'vk', style: 'wide' }); c._item = cardOfVk(it); }
+        else if (cat === 'vp') { c = cardEl(cardOfVkAlbum(it), { id: 'vk', style: 'wide' }); c._item = cardOfVkAlbum(it); }
         else { c = cardEl(it, { id: 'search', style: 'poster' }); c._item = it; }
         c.classList.add('gc'); section.appendChild(c);
       });
@@ -1381,6 +1561,8 @@
       var path;
       if (cat === 'yc') path = '/yt/channels?n=18&q=' + encodeURIComponent(q);
       else if (cat === 'yv') path = '/yt/search?n=30&q=' + encodeURIComponent(q);
+      else if (cat === 'vv') path = '/vk/search?kind=video&q=' + encodeURIComponent(q);
+      else if (cat === 'vp') path = '/vk/search?kind=album&q=' + encodeURIComponent(q);
       else {
         var f = sfGet(), pr = periodParams(f.p);
         path = '/home/search/v2?category=' + cat + '&q=' + encodeURIComponent(q) + '&country=' + f.c + (pr[0] ? '&from=' + pr[0] + '&to=' + pr[1] : '') + (f.r ? '&minr=' + f.r : '');
@@ -1423,6 +1605,8 @@
     if (inp.value) { last = ''; run(inp.value); }
   }
   function cardOfYt(v) { return { id: v.id, title: v.title, thumb: v.thumb, duration: v.duration, channel: v.channel, channel_id: v.channel_id, published: v.published, views: v.views }; }
+  function cardOfVk(v) { return { id: v.id, title: v.title, thumb: v.thumb, duration: v.duration, provider: 'vk' }; }
+  function cardOfVkAlbum(a) { return { id: a.id, title: a.title || a.id, thumb: a.thumb, provider: 'vk', vk_album: a.id }; }
 
   // страница человека: его фильмография
   function openPerson(id, name) {
@@ -1463,11 +1647,12 @@
       syncAfr();
       state.waiting=false;hideWait();
       if(refreshUserPolicy())return;
-      if(!state.setupOpen&&state.server)refreshMyChannels();
+      if(!state.setupOpen&&state.server){refreshMyChannels();refreshMyVk();if(away>=3)loadWeather();}
       // вернулись из плеера/Lampa (≥15 с): ленты «Продолжить» и «Мои сериалы» обновляем сразу, остальное — раз в 2 минуты
       if (!state.setupOpen && state.server && (away >= 3 || Date.now() - state.lastLoad > 120000)) { state.lastLoad = Date.now(); loadRows(away >= 3); }
       if (away > 300) maybeAutoTv(away);
     },
+    ack: function (id) { try { MC.shellAck(id, true); } catch (e) {} },
     back: function () { if (state.move) { moveCancel(); return; } if (state.waiting) { try{if(MC.cancelNavigation)MC.cancelNavigation();}catch(e){}state.waiting = false; hideWait(); } else if (state.searchOpen) { closeSearch(); } else if (state.setupOpen && !state.firstRun) { setupShow(false); } else if (!state.setupOpen) setFocus(0, 0); },
     onFound: function () {}, onScanDone: function () {}
   };

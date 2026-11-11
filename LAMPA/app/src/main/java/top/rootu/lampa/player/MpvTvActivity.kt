@@ -77,6 +77,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
     private var sessionDrc: MpvSessionDrc? = null
     private var engine = "mpv"
     private var hwdec = "mediacodec-copy"
+    private var frameClock: FrameClock? = null
 
     private var statsOn = false
     private var panelOpen = false
@@ -198,6 +199,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        top.rootu.lampa.WakeTrace.mark("player")
         top.rootu.lampa.RemindWatcher.mpvAlive = true   // напоминания в эфире mpv обрабатывает сам плеер
         fromLaunch = System.currentTimeMillis() - top.rootu.lampa.TvLaunch.at < 120_000
         top.rootu.lampa.TvLaunch.at = 0
@@ -404,6 +406,11 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
         }
         progMenu.addView(progList, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(progMenu, FrameLayout.LayoutParams(dp(900), -1, Gravity.START))
+        val base = (intent.getStringExtra("home_base") ?: playbackOwner.optString("server_base")).trimEnd('/')
+        frameClock = FrameClock(this, base) { connection ->
+            if (base.isNotBlank()) top.rootu.lampa.ProfileRuntime.requestHeaders(playbackOwner).forEach { (k, v) -> connection.setRequestProperty(k, v) }
+        }
+        frameClock?.mount(root)
         setContentView(root)
     }
 
@@ -1232,6 +1239,7 @@ class MpvTvActivity : Activity(), SurfaceHolder.Callback, MPVLib.EventObserver {
 
     override fun onDestroy() {
         destroyed = true
+        frameClock?.stop()
         top.rootu.lampa.RemindWatcher.mpvAlive = false
         ui.removeCallbacksAndMessages(null)
         try { MPVLib.removeObserver(this) } catch (_: Exception) {}

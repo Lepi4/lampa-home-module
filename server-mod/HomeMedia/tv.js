@@ -1234,6 +1234,7 @@
 
   // «Телевидение (Lampa Home)» — отдельная точка входа приложения для программ автоматизации (TvLaunchActivity)
   function launchStart() {
+    try { if (window.AndroidJS && AndroidJS.wakeMark) AndroidJS.wakeMark('launch'); } catch (e) {}
     var ch = -1;
     try { ch = window.AndroidJS && AndroidJS.tvLaunchTake ? AndroidJS.tvLaunchTake() : -1; } catch (e) {}
     if (typeof ch !== 'number' || ch < 0) return;

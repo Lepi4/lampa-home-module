@@ -218,12 +218,18 @@ public static class ProfilePolicy
     public static bool SourceEnabled(string source)
     {
         if (HomeDb.Get("module_" + source) == "0") return false;
-        if (!Profiles.Enabled) return source != "vk";
+        if (source == "vk")
+        {
+            if (!Profiles.Enabled) return true;
+            var who = Profiles.Current;
+            return who != null && !who.Child;
+        }
+        if (!Profiles.Enabled) return true;
         var user = Profiles.Current;
         if (user == null) return false;
         var settings = Profiles.Get(user.Id)?["settings"];
         if (source == "youtube" && (string)settings?["youtube_mode"] == "off") return false;
-        return (bool?)settings?["sources"]?[source] ?? source != "vk";
+        return (bool?)settings?["sources"]?[source] ?? true;
     }
     public static async Task<bool> Allows(JObject card)
     {

@@ -102,6 +102,14 @@
           if (hs.idx > 0) { hs.pl.shift(); hs.idx--; } else hs.pl.pop();
         }
       }
+      if (hs.src === 'url') {
+        var magnet = obj.magnet || obj.MagnetUri || (obj.torrent && (obj.torrent.MagnetUri || obj.torrent.Link)) || '';
+        var infohash = '';
+        var hm = String(it.url || '').match(/[?&]link=([a-fA-F0-9]{40})/);
+        if (hm) infohash = hm[1].toLowerCase();
+        if (!infohash && magnet) { var bm = String(magnet).match(/btih:([a-fA-F0-9]{40})/i); if (bm) infohash = bm[1].toLowerCase(); }
+        if (magnet || infohash) hs = $.extend({}, hs, { magnet: String(magnet).slice(0, 2000), infohash: infohash });
+      }
       MAP[String(h)] = { hs: hs, card: key, title: String(it.title || '').slice(0, 200), pi: i, many: items.length > 1 };
     });
   }
@@ -113,7 +121,7 @@
       var m = MAP[String(h)]; if (!m) return null;
       // список серий раздачи здесь НЕ повторяется: он передаётся плееру один раз на запуск (resume_playlist), у серии только её номер в нём (pi)
       var hs = m.hs, multi = hs.src === 'url' && m.many;
-      var r = { src: hs.src, item: hs.item, season: hs.season, ep: hs.ep, release: hs.release, voice: hs.voice, url: hs.src === 'url' && !(multi && String(hs.url || '').length <= 300) ? hs.url : undefined, q: hs.q || undefined, title: m.title, pi: multi ? m.pi : undefined };
+      var r = { src: hs.src, item: hs.item, season: hs.season, ep: hs.ep, release: hs.release, voice: hs.voice, url: hs.src === 'url' && !(multi && String(hs.url || '').length <= 300) ? hs.url : undefined, q: hs.q || undefined, title: m.title, pi: multi ? m.pi : undefined, magnet: hs.magnet || undefined, infohash: hs.infohash || undefined };
       return JSON.parse(JSON.stringify(r));
     } catch (e) { return null; }
   };
@@ -174,7 +182,7 @@
     SENT[m.card] = { t: now, h: tl.hash, done: done, plOk: last && last.h === tl.hash && last.plOk };
     var hs = m.hs;
     post(m.card, {
-      src: hs.src, item: hs.item, season: hs.season, ep: hs.ep, release: hs.release, voice: hs.voice, url: hs.src === 'url' ? hs.url : undefined,
+      src: hs.src, item: hs.item, season: hs.season, ep: hs.ep, release: hs.release, voice: hs.voice, url: hs.src === 'url' ? hs.url : undefined, magnet: hs.magnet || undefined, infohash: hs.infohash || undefined,
       pl: hs.pl && firstForHash ? hs.pl : undefined, idx: hs.pl && firstForHash ? hs.idx : undefined, plKeep: hs.pl && !firstForHash ? true : undefined,
       q: hs.q || undefined, title: m.title, pos: Math.round(tl.time || 0), dur: Math.round(tl.duration || 0), done: done, hash: String(tl.hash), at: (tl.home_native && tl.updated) ? tl.updated : now
     }, function () { var s = SENT[m.card]; if (s && s.h === tl.hash) s.plOk = true; });
@@ -477,12 +485,43 @@
       native.playlist = playlist;
       native.tl_meta = JSON.stringify(metas);
       native.resume_playlist = JSON.stringify(resumeList);
-      reach(playlist[start].url, function (alive) {
-        if (!alive) return fail('сервер раздачи не отвечает (TorrServer недоступен или раздача удалена)');
+      var hash = String(rec.infohash || '').toLowerCase();
+      if (!/^[a-f0-9]{40}$/.test(hash)) {
+        var found = String(playlist[start].url || '').match(/[?&]link=([a-fA-F0-9]{40})/);
+        hash = found ? found[1].toLowerCase() : '';
+      }
+      function playNow() {
         window.__apKey = movie.id + '_' + media; window.__apKeyAt = Date.now();
         Lampa.Player.play(native);
         Lampa.Player.playlist(playlist);
         ok();
+      }
+      function statTorrent(done) {
+        var base = '';
+        try { base = String((Lampa.Torserver && Lampa.Torserver.url && Lampa.Torserver.url()) || '').replace(/\/$/, ''); } catch (e) {}
+        if (!base || !/^[a-f0-9]{40}$/.test(hash)) return done(false);
+        function get() {
+          $.ajax({
+            url: base + '/torrents', type: 'POST', contentType: 'application/json', dataType: 'json', timeout: 8000,
+            data: JSON.stringify({ action: 'get', hash: hash }),
+            success: function (d) { done(!!(d && d.file_stats && d.file_stats.length)); },
+            error: function () { done(false); }
+          });
+        }
+        if (!rec.magnet) return get();
+        $.ajax({
+          url: base + '/torrents', type: 'POST', contentType: 'application/json', dataType: 'json', timeout: 12000,
+          data: JSON.stringify({ action: 'add', link: String(rec.magnet), title: rec.title || '', save_to_db: true }),
+          complete: function () { setTimeout(get, 700); }
+        });
+      }
+      if (/^[a-f0-9]{40}$/.test(hash)) statTorrent(function (alive) {
+        if (!alive) return fail('сервер раздачи не отвечает (TorrServer недоступен или раздача удалена)');
+        playNow();
+      });
+      else reach(playlist[start].url, function (alive) {
+        if (!alive) return fail('сервер раздачи не отвечает (TorrServer недоступен или раздача удалена)');
+        playNow();
       });
     }
   };

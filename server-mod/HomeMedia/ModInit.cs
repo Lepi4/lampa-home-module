@@ -44,9 +44,9 @@ public class ModInit : IModuleLoaded
             bool publicProfileRoute = requestedPath == "/home/profiles" || requestedPath == "/home/session/bootstrap" || requestedPath == "/home/session/login" || requestedPath == "/home/session/renew" || requestedPath == "/home/admin/login" || requestedPath == "/home/admin/session" || requestedPath == "/home/session/entry";
             bool jrResults = requestedPath == "/jr/api/v2.0/indexers/all/results";
             bool apiResults = Regex.IsMatch(requestedPath, @"^/api/v2\.0/indexers/[^/]+/results$", RegexOptions.CultureInvariant);
-            bool personalRoute = jrResults || apiResults || requestedPath.StartsWith("/kp/") || requestedPath.StartsWith("/home/") || requestedPath.StartsWith("/anime/") || requestedPath.StartsWith("/yt/") || requestedPath.StartsWith("/local/") || requestedPath.StartsWith("/wrestling/") || requestedPath.StartsWith("/bookmark/") || requestedPath.StartsWith("/timecode/") || requestedPath.StartsWith("/storage/") || requestedPath.StartsWith("/tv/") || requestedPath.StartsWith("/ym/");
+            bool personalRoute = jrResults || apiResults || requestedPath.StartsWith("/kp/") || requestedPath.StartsWith("/home/") || requestedPath.StartsWith("/anime/") || requestedPath.StartsWith("/yt/") || requestedPath.StartsWith("/vk/") || requestedPath.StartsWith("/local/") || requestedPath.StartsWith("/wrestling/") || requestedPath.StartsWith("/bookmark/") || requestedPath.StartsWith("/timecode/") || requestedPath.StartsWith("/storage/") || requestedPath.StartsWith("/tv/") || requestedPath.StartsWith("/ym/");
             // Media URLs remain LAN streams. Profile authorization applies to catalogs, selection and native launch, not to HLS segment requests.
-            bool mediaRoute=requestedPath=="/wrestling/poster.svg"||requestedPath=="/wrestling/file"||requestedPath=="/home/wallpaper"||requestedPath.StartsWith("/kp/stream")||requestedPath=="/yt/p"||requestedPath.StartsWith("/anime/play")||requestedPath.StartsWith("/local/plex/file/")||requestedPath.StartsWith("/local/plex/hls/")||requestedPath=="/local/plex/seg"||requestedPath.StartsWith("/tv/logo/");
+            bool mediaRoute=requestedPath=="/wrestling/poster.svg"||requestedPath=="/wrestling/file"||requestedPath=="/home/wallpaper"||requestedPath.StartsWith("/kp/stream")||requestedPath=="/yt/p"||requestedPath=="/vk/p"||requestedPath.StartsWith("/anime/play")||requestedPath.StartsWith("/local/plex/file/")||requestedPath.StartsWith("/local/plex/hls/")||requestedPath=="/local/plex/seg"||requestedPath.StartsWith("/tv/logo/");
             bool discoveryRoute = requestedPath.StartsWith("/home/app-updates/") || requestedPath == "/home/health" || requestedPath == "/home/whoami" || requestedPath == "/home/hello" || requestedPath == "/home/discover" || requestedPath == "/home/seed";
             // Browser navigation to a service must lead to a login/recovery page, not raw JSON.
             // API clients keep the machine-readable 401/403 below.
@@ -79,9 +79,24 @@ public class ModInit : IModuleLoaded
                     e.httpContext.Response.WriteAsync("{\"error\":\"source_disabled\",\"source\":\"youtube\"}").GetAwaiter().GetResult();
                     return false;
                 }
+                if(requestedPath.StartsWith("/vk/") && requestedPath != "/vk/p"){
+                    bool subs=requestedPath.StartsWith("/vk/subs");
+                    if(user.Child){
+                        e.httpContext.Response.StatusCode=403;
+                        e.httpContext.Response.ContentType="application/json";
+                        e.httpContext.Response.WriteAsync("{\"error\":\"profile_forbidden\"}").GetAwaiter().GetResult();
+                        return false;
+                    }
+                    if(!ProfilePolicy.SourceEnabled("vk") && !(subs && user.Admin)){
+                        e.httpContext.Response.StatusCode=403;
+                        e.httpContext.Response.ContentType="application/json";
+                        e.httpContext.Response.WriteAsync("{\"error\":\"source_disabled\",\"source\":\"vk\"}").GetAwaiter().GetResult();
+                        return false;
+                    }
+                }
                 bool adminWriteRoute=requestedPath=="/home/kp/folders"||requestedPath=="/home/kp/folders/set"||requestedPath=="/anime/cache/clear"||requestedPath=="/home/wallpaper/upload"||requestedPath=="/home/wallpaper/delete"||(requestedPath=="/home/torrserver"&&e.httpContext.Request.Query.ContainsKey("url"));
                 if(adminWriteRoute&&!user.Admin){e.httpContext.Response.StatusCode=403;e.httpContext.Response.ContentType="application/json";e.httpContext.Response.WriteAsync("{\"error\":\"admin_required\"}").GetAwaiter().GetResult();return false;}
-                bool adminPath=requestedPath.StartsWith("/home/ops/")||requestedPath.StartsWith("/home/admin/")||requestedPath.StartsWith("/kp/auth/")||requestedPath.StartsWith("/kp/profile/")||requestedPath.StartsWith("/home/kp/profile/")||requestedPath=="/home/dev/list"||requestedPath=="/home/dev/forget"||requestedPath=="/home/dev/rename"||requestedPath.StartsWith("/home/animelib/")||requestedPath.StartsWith("/yt/profiles/remove")||requestedPath=="/yt/dbg";
+                bool adminPath=requestedPath.StartsWith("/home/ops/")||requestedPath.StartsWith("/home/admin/")||requestedPath.StartsWith("/kp/auth/")||requestedPath.StartsWith("/kp/profile/")||requestedPath.StartsWith("/home/kp/profile/")||requestedPath=="/kp/progress/import"||requestedPath=="/home/dev/list"||requestedPath=="/home/dev/forget"||requestedPath=="/home/dev/rename"||requestedPath.StartsWith("/home/animelib/")||requestedPath.StartsWith("/yt/profiles/remove")||requestedPath=="/yt/dbg";
                 bool childDenied=user.Child&&((requestedPath.StartsWith("/wrestling/")&&requestedPath!="/wrestling/poster.svg"&&requestedPath!="/wrestling/file")||requestedPath.StartsWith("/ym/")||requestedPath.StartsWith("/tmdb/api/")||requestedPath.StartsWith("/tv/config/set")||requestedPath.StartsWith("/tv/refresh")||requestedPath.StartsWith("/tv/keep")||requestedPath.StartsWith("/local/config")||requestedPath.StartsWith("/kp/config")||((string)Profiles.Get(user.Id)?["settings"]?["youtube_mode"]=="channels"&&(requestedPath.StartsWith("/yt/subs/add")||requestedPath.StartsWith("/yt/subs/remove")||requestedPath.StartsWith("/yt/subs/import"))));
                 if(adminPath&&!user.Admin||childDenied){e.httpContext.Response.StatusCode=403;e.httpContext.Response.ContentType="application/json";e.httpContext.Response.WriteAsync("{\"error\":\"profile_forbidden\"}").GetAwaiter().GetResult();return false;}
             }
@@ -102,7 +117,7 @@ public class ModInit : IModuleLoaded
                 bool force = path == "/lampainit.js" || path.StartsWith("/privateinit.js");
                 if (path.StartsWith("/lampa-main/") && !path.EndsWith("personal.lampa") && !path.EndsWith("plugins_black_list.json")) cc = "public, max-age=604800";
                 else if (path.StartsWith("/tmdb/img/")) cc = "public, max-age=2592000";
-                else if (path == "/" || path == "/lampainit.js" || path.StartsWith("/privateinit.js") || path == "/tv.js" || path == "/kinopub.js" || path == "/anime.js" || path == "/continue.js" || path == "/wrestling.js" || path == "/cardplus.js" || path == "/apps.js" || path == "/yamusic.js" || path == "/youtube.js") cc = "no-cache";
+                else if (path == "/" || path == "/lampainit.js" || path.StartsWith("/privateinit.js") || path == "/tv.js" || path == "/kinopub.js" || path == "/anime.js" || path == "/continue.js" || path == "/wrestling.js" || path == "/cardplus.js" || path == "/apps.js" || path == "/yamusic.js" || path == "/youtube.js" || path == "/vk.js") cc = "no-cache";
                 if (cc != null)
                     ctx.Response.OnStarting(() =>
                     {
@@ -127,6 +142,7 @@ public class ModInit : IModuleLoaded
         EventListener.Staticache += AllowShellCache;
         _ = HomeDb.Counts(); // migrate candidate schema before accepting profile traffic
         if (!Profiles.IsTest) KpBridge.Start();
+        if (!Profiles.IsTest) _ = KpProgressImport.Once();
         Ops.Start();
         TcWatch.Start();
         if (!Profiles.IsTest) TvStore.StartKeep();

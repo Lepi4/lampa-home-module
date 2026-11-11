@@ -315,9 +315,73 @@
     });
   }
 
+  var weatherCache = null, weatherAt = 0;
+  function weatherNight(when) {
+    var h = (when || new Date()).getHours();
+    return h < 6 || h >= 18;
+  }
+  function weatherMark(kind, when) {
+    var night = weatherNight(when);
+    if (kind === 'clear') return night ? '\u263E' : '\u2600';
+    if (kind === 'partly') return night ? '\u263E\u2601' : '\u26C5';
+    if (kind === 'cloudy') return night ? '\u263E\u2601' : '\u2601';
+    if (kind === 'rain') return '\u2602';
+    if (kind === 'snow') return '\u2744';
+    if (kind === 'storm') return '\u26A1';
+    return '\u25CF';
+  }
+  function weatherText(d) {
+    if (!d || d.weather !== true || d.temp == null || isNaN(Number(d.temp))) return '';
+    var t = Math.round(Number(d.temp));
+    return weatherMark(d.condition) + ' ' + ((t > 0 ? '+' : '') + t + '\u00B0');
+  }
+  function paintWeather() {
+    var text = weatherText(weatherCache);
+    var node = document.getElementById('cp-clock');
+    if (!node) {
+      node = document.createElement('div');
+      node.id = 'cp-clock';
+      node.style.cssText = 'position:fixed;top:4px;right:18px;z-index:40;color:#fff;font-size:28px;font-weight:500;background:transparent;text-shadow:0 2px 6px #000;pointer-events:none';
+      document.body.appendChild(node);
+    }
+    var d = new Date();
+    var time = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+    node.textContent = text ? time + '  ' + text : time;
+    if (node._minute !== d.getMinutes()) {
+      node._minute = d.getMinutes();
+      if (d.getMinutes() % 3 === 0) {
+        node.style.transition = 'transform .35s ease';
+        node.style.transform = 'rotate(4deg)';
+        setTimeout(function () {
+          node.style.transition = 'transform .5s ease';
+          node.style.transform = 'rotate(-4deg)';
+          setTimeout(function () {
+            node.style.transition = 'transform .35s ease';
+            node.style.transform = 'rotate(0deg)';
+          }, 500);
+        }, 350);
+      }
+    }
+  }
+  function hookWeather() {
+    if (!window.__cpClock) window.__cpClock = setInterval(paintWeather, 10000);
+    paintWeather();
+    Lampa.Listener.follow('full', function (e) {
+      if (e.type !== 'complite') return;
+      if (weatherCache && Date.now() - weatherAt < 15 * 60 * 1000) { paintWeather(); return; }
+      $.ajax({ url: BASE + '/home/weather', dataType: 'json', timeout: 8000, cache: false, success: function (d) {
+        weatherCache = d; weatherAt = Date.now(); paintWeather();
+      }});
+    });
+    $.ajax({ url: BASE + '/home/weather', dataType: 'json', timeout: 8000, cache: false, success: function (d) {
+      weatherCache = d; weatherAt = Date.now(); paintWeather();
+    }});
+  }
+
   function start() {
     hookSeriesInfo();
     hookFull();
+    hookWeather();
     setInterval(scan, 900);
   }
 

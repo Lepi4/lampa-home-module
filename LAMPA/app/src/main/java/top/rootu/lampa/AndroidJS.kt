@@ -415,6 +415,10 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     @org.xwalk.core.JavascriptInterface
     fun tvLaunchTake(): Int { val c = TvLaunch.channel; TvLaunch.channel = -1; return c }
 
+    @JavascriptInterface
+    @org.xwalk.core.JavascriptInterface
+    fun wakeMark(stage: String) { if (stage == "launch") WakeTrace.mark("launch") }
+
     // Значок программы как data:image/png (для пункта меню)
     @JavascriptInterface
     @org.xwalk.core.JavascriptInterface
