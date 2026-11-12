@@ -405,6 +405,9 @@ public static class VkStore
             offset += items.Count;
             if (items.Count == 0 || offset >= count) break;
         }
+        info["shown"] = videos.Count;
+        info["total"] = total;
+        info["truncated"] = total > videos.Count;
         var subscribed = Channels(Pack()).Children<JObject>().Any(x => (string)x["id"] == owner.ToString());
         return new JObject { ["info"] = new JObject(info) { ["subscribed"] = subscribed, ["total"] = total }, ["results"] = videos };
     }
@@ -544,8 +547,10 @@ public static class VkStore
             ["title"] = string.IsNullOrEmpty(title) ? "Плейлист" : title,
             ["thumb"] = thumb,
             ["count"] = count > 0 ? count : rows.Count,
+            ["subscribed"] = subscribed,
+            ["shown"] = rows.Count,
             ["total"] = count > 0 ? count : rows.Count,
-            ["subscribed"] = subscribed
+            ["truncated"] = count > rows.Count
         };
         return new JObject { ["id"] = id, ["info"] = info, ["results"] = new JArray(rows) };
     }

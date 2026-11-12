@@ -1051,7 +1051,7 @@
                 try {
                   if (data.tl_meta && typeof window.__home_resume === 'function') {
                     var tm2 = JSON.parse(data.tl_meta), anyPi = false;
-                    tm2.forEach(function (e) { if (e && e.h) { var rr = window.__home_resume(e.h); if (rr) { e.r = rr; if (rr.pi !== undefined) anyPi = true; } } });
+                    tm2.forEach(function (e) { if (e && e.h) { var rr = window.__home_resume(e.h); if (rr && !(e.r && e.r.src === 'lift')) { e.r = rr; if (rr.pi !== undefined) anyPi = true; } } });
                     data.tl_meta = JSON.stringify(tm2);
                     // общий список серий раздачи — один раз на запуск (иначе он повторялся бы в каждой серии и не помещался в Intent)
                     if (anyPi && data.playlist && data.playlist.length) {
@@ -1064,8 +1064,25 @@
               }
             } catch (e) {}
             var self=this,args=arguments;
-            if(typeof window.__home_prepare_progress!=='function')return orig.apply(self,args);
-            return window.__home_prepare_progress(data,function(){orig.apply(self,args);},function(message){try{Lampa.Noty.show(message);}catch(ignore){}});
+            function fail(message){
+              if(data && data.home_source==='lift' && window.HomeLift) HomeLift.failed(data,message);
+              else try{Lampa.Noty.show(message);}catch(ignore){}
+            }
+            function launch(){
+              if(data && data.home_source==='lift' && (!window.HomeLift || !HomeLift.valid(data)))return;
+              args[0]=data && data.url || args[0];
+              try{var result=orig.apply(self,args);if(data && data.home_source==='lift')HomeLift.accepted(data);return result;}
+              catch(e){fail('Не удалось запустить плеер');}
+            }
+            function prepared(){
+              if(data && data.home_source==='lift') {
+                if(typeof window.__home_lift_before_native!=='function')return fail('Обновите модуль Lift');
+                return window.__home_lift_before_native(data,launch,fail);
+              }
+              return launch();
+            }
+            if(typeof window.__home_prepare_progress!=='function')return prepared();
+            return window.__home_prepare_progress(data,prepared,fail);
           };
           Lampa.Android.__pxWrapped = true;
         }

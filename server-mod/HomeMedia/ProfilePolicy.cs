@@ -219,6 +219,15 @@ public static class ProfilePolicy
     public static bool SourceEnabled(string source)
     {
         if (HomeDb.Get("module_" + source) == "0") return false;
+        if (source == "lift")
+        {
+            if (HomeDb.Get("module_lift") != "1") return false;
+            if (!Profiles.Enabled) return false;
+            var liftUser = Profiles.Current;
+            if (liftUser == null) return false;
+            var liftSettings = Profiles.Get(liftUser.Id)?["settings"];
+            return (bool?)liftSettings?["sources"]?["lift"] ?? false;
+        }
         if (source == "vk")
         {
             if (!Profiles.Enabled) return true;

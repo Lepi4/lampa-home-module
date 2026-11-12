@@ -154,7 +154,7 @@ class FrameClock(
         val next = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         Canvas(next).drawText(line, width / 2f, -fm.ascent + 2f, paint)
         synchronized(lock) { bitmap = next }
-        ui.post { showPlate() }
+        ui.post { if (ticket == generation.get() && visible) showPlate() }
     }
 
     private fun weatherLine(): String {

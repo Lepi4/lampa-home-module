@@ -251,6 +251,18 @@ public class ProfilesController : BaseController
     {
         var user=Viewer();if(user==null)return J(new{error="session_required"},401);var b=await Body();
         if(!string.IsNullOrEmpty((string)b["youtube_id"])&&!ProfilePolicy.SourceEnabled("youtube"))return J(new{error="source_disabled",source="youtube"},403);
+        if((string)b["source"]=="lift") {
+            try {
+                var key=Regex.Match((string)b["card"]??"",@"^(\d+)_(tv|movie)$");
+                if(!key.Success)return J(new{error="lift_bad_target"},403);
+                var target=LiftTarget.Parse(key.Groups[2].Value,long.Parse(key.Groups[1].Value),(int?)b["season"]??0,(int?)b["episode"]??0);
+                await LiftService.Require(target);
+                var binding=LiftBindings.Get(target);
+                if(binding==null || (string)binding["revision"]!=(string)b["binding_revision"])return J(new{error="lift_binding_changed"},403);
+            } catch(UnauthorizedAccessException){return J(new{error="parental_blocked"},403);}
+              catch(InvalidOperationException){return J(new{error="source_disabled"},403);}
+              catch(ArgumentException){return J(new{error="lift_bad_target"},403);}
+        }
         if(!user.Child)return J(new{ok=true});
         string card=(string)b["card"],yt=(string)b["youtube_id"],tv=(string)b["tv_channel"];
         // Live TV uses the same Channel Manager lineup for every viewer.
@@ -469,7 +481,7 @@ public class ProfilesController : BaseController
             string pin=child?null:(b.Property("pin")!=null?Profiles.PinHash((string)b["pin"]):(string)old?["pin_hash"]);
             var cfg=(JObject)(b["settings"]??old?["settings"]??new JObject());
             if(cfg["sources"]!=null&&cfg["sources"] is not JObject)return J(new{error="bad_sources"},400);
-            if(cfg["sources"] is JObject sources)foreach(string key in new[]{"youtube","vk"})if(sources[key]!=null&&sources[key].Type!=JTokenType.Boolean)return J(new{error="bad_source_flag"},400);
+            if(cfg["sources"] is JObject sources)foreach(string key in new[]{"youtube","vk","lift"})if(sources[key]!=null&&sources[key].Type!=JTokenType.Boolean)return J(new{error="bad_source_flag"},400);
             if(cfg["torrent_auto"]==null)cfg["torrent_auto"]=false;
             if(cfg["allow_subtitles_only"]==null)cfg["allow_subtitles_only"]=false;
             if(cfg["allow_subtitles_only"].Type!=JTokenType.Boolean)return J(new{error="bad_allow_subtitles_only"},400);

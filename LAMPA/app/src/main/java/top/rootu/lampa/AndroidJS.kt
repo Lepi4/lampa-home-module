@@ -218,6 +218,10 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
 
     @JavascriptInterface
     @org.xwalk.core.JavascriptInterface
+    fun liftVersion(): Int = 1
+
+    @JavascriptInterface
+    @org.xwalk.core.JavascriptInterface
     fun appVersion(): String {
         return BuildConfig.VERSION_NAME + "-" + BuildConfig.VERSION_CODE
     }
@@ -608,7 +612,7 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
     @JavascriptInterface
     @org.xwalk.core.JavascriptInterface
     fun openPlayer(link: String, jsonStr: String) {
-        debugLog(TAG, "openPlayer: $link json:$jsonStr")
+        debugLog(TAG, "openPlayer requested")
         val jsonObject = try {
             JSONObject(jsonStr.ifEmpty { "{}" }).apply {
                 if (!has("url")) {

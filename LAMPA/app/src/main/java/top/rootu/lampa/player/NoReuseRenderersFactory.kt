@@ -30,6 +30,7 @@ import androidx.media3.exoplayer.video.VideoRendererEventListener
 class NoReuseRenderersFactory(context: Context, private val drc: DrcAudioProcessor? = null) : DefaultRenderersFactory(context) {
 
     @Volatile var allowPassthrough = false
+    @Volatile var videoSelectorOverride: MediaCodecSelector? = null
     @Volatile var lastAudioOutputMime: String? = null
     private var activeAudioSink: DefaultAudioSink? = null
 
@@ -111,7 +112,7 @@ class NoReuseRenderersFactory(context: Context, private val drc: DrcAudioProcess
     ) {
         out.add(
             NoReuseVideoRenderer(
-                context, codecAdapterFactory, mediaCodecSelector, allowedVideoJoiningTimeMs,
+                context, codecAdapterFactory, videoSelectorOverride ?: mediaCodecSelector, allowedVideoJoiningTimeMs,
                 enableDecoderFallback, eventHandler, eventListener, 50
             )
         )

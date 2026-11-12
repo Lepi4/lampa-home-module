@@ -92,6 +92,9 @@ class HomePlayerActivity : Activity() {
     private lateinit var descView: TextView
     private val seekButtons = ArrayList<TextView>()
     private var live = false
+    private var liftSource = false
+    private var liftVoiceRep = ""
+    private var liftGate: LiftStartGate? = null
     private lateinit var frameRate: PlaybackFrameRateController
     private val ptsRate = PtsFrameRateEstimator()
     private val drc = DrcAudioProcessor()
@@ -292,6 +295,7 @@ class HomePlayerActivity : Activity() {
 
     // idxs — элементы для отправки; ended — серия закончилась целиком (автопереход или конец списка)
     private fun tlSend(idxs: List<Int>, ended: Boolean, force: Boolean = false) {
+        if (liftSource && !firstFrameSeen) return // A failed preflight is not a new viewing position.
         val meta = tlMeta ?: return
         val base = homeBase.ifBlank { return }
         val rows = JSONArray()
@@ -999,6 +1003,11 @@ class HomePlayerActivity : Activity() {
         if (headers.isNotEmpty()) http.setDefaultRequestProperties(headers)
 
         live = intent.getBooleanExtra("live", false)
+        liftSource = intent.getStringExtra("home_source") == "lift"
+        liftVoiceRep = intent.getStringExtra("lift_voice_rep") ?: ""
+        if(liftSource && liftVoiceRep.isBlank()) {
+            Toast.makeText(this,"Lift: не выбрана озвучка",Toast.LENGTH_LONG).show();finish();return
+        }
         val playerPrefs = getSharedPreferences("home_player", MODE_PRIVATE)
         val afr = playerPrefs.getBoolean("afr", intent.getIntExtra("tv_afr", 1) != 0)
         frameRate.configure(afr, live)
@@ -1063,7 +1072,6 @@ class HomePlayerActivity : Activity() {
                     // вручную качество по-прежнему переключается в меню плеера
                     if (!live) {
                         setForceHighestSupportedBitrate(true)
-                        if(memQuality==0){trackSelector.parameters=trackSelector.buildUponParameters().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build();return}
         val limit=intent.getIntExtra("max_height",0)
         val mh=memQuality?.takeIf { it>0 }?.let { if(limit>0)minOf(limit,it)else it }?:limit
                         // класс качества считаем по ширине: кадр 1920x804 — это 1080p, а не «804p»
@@ -1072,7 +1080,10 @@ class HomePlayerActivity : Activity() {
                 }
                 .build()
         }
-        audioRenderers = NoReuseRenderersFactory(this, drc).apply { allowPassthrough = audioOutput.passthrough }
+        audioRenderers = NoReuseRenderersFactory(this, drc).apply {
+            allowPassthrough = audioOutput.passthrough
+            if (liftSource) videoSelectorOverride = LiftVp9Support.hardwareVp9Selector()
+        }
         player = ExoPlayer.Builder(
             this,
             // декодер при смене канала создаётся заново (иначе Amlogic «сыплет» картинку после переключения)
@@ -1090,7 +1101,7 @@ class HomePlayerActivity : Activity() {
             .build()
         playerView.player = player
         if (live) swapSurface(wantTexture(data.lastPathSegment))
-        player.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger())
+        if (!liftSource) player.addAnalyticsListener(androidx.media3.exoplayer.util.EventLogger())
         player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             override fun onVideoInputFormatChanged(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
                 format: androidx.media3.common.Format, decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?) {
@@ -1152,6 +1163,7 @@ class HomePlayerActivity : Activity() {
         val items = uris.mapIndexed { i, u ->
             val b = MediaItem.Builder().setUri(u)
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(names.getOrNull(i) ?: title).build())
+            if (liftSource) b.setMimeType(MimeTypes.APPLICATION_MPD)
             if (i == startIndex && subs.isNotEmpty()) {
                 b.setSubtitleConfigurations(subs.mapIndexed { si, su ->
                     MediaItem.SubtitleConfiguration.Builder(su)
@@ -1212,7 +1224,7 @@ class HomePlayerActivity : Activity() {
         if (!live && tlMeta != null && homeBase.isNotBlank()) { tlCur = startIndex; ui.postDelayed(tlTick, 10_000) }
         if (!live && audioKey.isNotBlank() && homeBase.isNotBlank()) { loadAudioMemory(); loadViewMemory() }
         player.addListener(object : Player.Listener {
-            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) { applyAudioMemory(); applyTextMemory(); applyDefaultQuality() }
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) { if (!liftSource) applyAudioMemory(); applyTextMemory(); if (!liftSource) applyDefaultQuality() }
 
             override fun onPlaybackStateChanged(state: Int) {
                 statusView.text = if (state == Player.STATE_BUFFERING && !live) "Загрузка…" else ""
@@ -1255,6 +1267,7 @@ class HomePlayerActivity : Activity() {
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (liftSource && playWhenReady && liftGate?.canPlay() != true) { player.pause(); return }
                 updateBufferIndicator(player.playbackState)
                 if (!playWhenReady && !live && !finished && firstFrameSeen && tlMeta != null) {
                     tlRemember()
@@ -1305,8 +1318,14 @@ class HomePlayerActivity : Activity() {
             }
         })
         beginFrameRateItem()
+        if (liftSource && liftVoiceRep.isNotBlank()) {
+            liftGate?.close()
+            liftGate = LiftStartGate(player, trackSelector, liftVoiceRep, intent.getStringExtra("lift_video_formats")?:"[]", intent.getIntExtra("max_height",0),
+                ready = { if (!finished) player.playWhenReady = true },
+                failed = { message -> if (!finished) { errored = true; Toast.makeText(this, message, Toast.LENGTH_LONG).show(); closePlayer() } })
+        }
         player.prepare()
-        player.playWhenReady = true
+        player.playWhenReady = !liftSource || liftGate?.canPlay() == true
         startStatsLog()
         updateTitle()
         if (live) ui.postDelayed(saveLast, 5000)
@@ -2251,6 +2270,12 @@ class HomePlayerActivity : Activity() {
 
     // дорожки без дублей: один и тот же звук нередко приходит в нескольких группах — в списке остаётся одна запись (выбранная в приоритете)
     private fun audioOptions(): List<Triple<String, Tracks.Group, Int>> {
+        if(liftSource) {
+            val voices=try{JSONArray(intent.getStringExtra("lift_audio_map")?:"[]")}catch(_:Exception){JSONArray()}
+            val rows=(0 until voices.length()).mapNotNull{voices.optJSONObject(it)}
+            return trackOptions(C.TRACK_TYPE_AUDIO){f->rows.singleOrNull{it.optString("representation_id")==f.id}?.optString("name").orEmpty()}
+                .filter { it.first.isNotBlank() }
+        }
         val byLabel = LinkedHashMap<String, Triple<String, Tracks.Group, Int>>()
         for (o in trackOptions(C.TRACK_TYPE_AUDIO) { audioDescribe(it) }) {
             val ex = byLabel[o.first]
@@ -2317,7 +2342,7 @@ class HomePlayerActivity : Activity() {
     // Авто-подбор ExoPlayer стартует с 720p и до 1080p/4K не дорастает. Поэтому по умолчанию берём лучшее качество в пределах профиля
     // устройства (extra max_height; без него — максимум), а «Авто» остаётся пунктом меню качества.
     private fun applyDefaultQuality() {
-        if (userPickedQuality || live || !::player.isInitialized) return
+        if (liftSource || userPickedQuality || live || !::player.isInitialized) return
         val opts = trackOptions(C.TRACK_TYPE_VIDEO) { "" }
         if (opts.isEmpty()) return
         val bestClass = opts.maxOf { qClass(it.second.getTrackFormat(it.third).width, it.second.getTrackFormat(it.third).height) }
@@ -2341,6 +2366,7 @@ class HomePlayerActivity : Activity() {
     }
 
     private fun applyAudioMemory() {
+        if(liftSource)return
         if (audioApplied || userPickedAudio || !memAudioLoaded || memAudioLabel.isBlank() || !::player.isInitialized) return
         val opts = audioOptions()
         if (opts.isEmpty()) return
@@ -2375,7 +2401,12 @@ class HomePlayerActivity : Activity() {
             userPickedAudio = true
             trackSelector.parameters = trackSelector.buildUponParameters()
                 .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, listOf(ti))).build()
-            saveAudioMemory(label, g.getTrackFormat(ti).language ?: "")
+            if(liftSource) {
+                val id=g.getTrackFormat(ti).id
+                val voices=try { JSONArray(intent.getStringExtra("lift_audio_map")?:"[]") } catch(_:Exception){JSONArray()}
+                val names=(0 until voices.length()).mapNotNull { voices.optJSONObject(it) }.filter { it.optString("representation_id")==id }
+                if(names.size==1)tlMeta?.optJSONObject(tlCur)?.optJSONObject("r")?.put("voice_name",names[0].optString("name"))
+            } else saveAudioMemory(label, g.getTrackFormat(ti).language ?: "")
         }
     }
 
@@ -2410,7 +2441,7 @@ class HomePlayerActivity : Activity() {
             val res = if (f.height > 0) "${qClass(f.width, f.height)}p" else "Видео"
             val br = if (f.bitrate > 0) String.format(Locale.US, " · %.1f Мбит/с", f.bitrate / 1_000_000.0) else ""
             res + " · " + codecName(f.sampleMimeType) + br
-        }.sortedByDescending { it.second.getTrackFormat(it.third).let { f -> qClass(f.width, f.height) * 10000 + f.height } }
+        }.filter { !liftSource || LiftVp9Support.allowed(it.second.getTrackFormat(it.third),intent.getStringExtra("lift_video_formats")?:"[]",intent.getIntExtra("max_height",0)) }.sortedByDescending { it.second.getTrackFormat(it.third).let { f -> qClass(f.width, f.height) * 10000 + f.height } }
         if (opts.size < 2) { Toast.makeText(this, "Качество одно: ${opts.firstOrNull()?.first ?: "—"}", Toast.LENGTH_SHORT).show(); return }
         val auto = player.trackSelectionParameters.overrides.none { it.key.type == C.TRACK_TYPE_VIDEO }
         val cur = if (auto) 0 else opts.indexOfFirst { it.second.isTrackSelected(it.third) } + 1
@@ -2419,7 +2450,10 @@ class HomePlayerActivity : Activity() {
             val picked = if (i == 0) null else opts[i - 1].second.getTrackFormat(opts[i - 1].third)
             saveViewMemory(JSONObject().put("quality_height", if (picked == null) 0 else qClass(picked.width, picked.height)))
             val b = trackSelector.buildUponParameters()
-            if (i == 0) b.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+            if (i == 0) {
+                b.clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                if(liftSource) LiftVp9Support.videoOverride(player.currentTracks,intent.getStringExtra("lift_video_formats")?:"[]",intent.getIntExtra("max_height",0))?.let { b.setOverrideForType(it) }
+            }
             else {
                 val (_, g, ti) = opts[i - 1]
                 b.setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, listOf(ti)))
@@ -2502,6 +2536,7 @@ class HomePlayerActivity : Activity() {
                     }
                 }
             }
+            liftGate?.close(); liftGate = null
             player.release()
         }
         if (::frameRate.isInitialized) frameRate.release()
@@ -2572,6 +2607,7 @@ class HomePlayerActivity : Activity() {
         frameClock?.stop()
         ui.removeCallbacksAndMessages(null)
         if (top.rootu.lampa.RemindWatcher.videoPlayer?.get() === this) top.rootu.lampa.RemindWatcher.videoPlayer = null
+        liftGate?.close(); liftGate = null
         if (::player.isInitialized && !finished) player.release()
         if (::frameRate.isInitialized) frameRate.release()
         super.onDestroy()

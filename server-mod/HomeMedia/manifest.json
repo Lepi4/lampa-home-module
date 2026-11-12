@@ -52,6 +52,10 @@
     "ProfileMirror.cs",
     "ProfileAvailability.cs",
     "ProgressResolve.cs",
-    "AppUpdates.cs"
+    "AppUpdates.cs",
+    "LiftPlanCore.cs",
+    "LiftService.cs",
+    "LiftController.cs",
+    "LiftVp9Policy.cs"
   ]
 }

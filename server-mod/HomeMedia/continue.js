@@ -12,8 +12,8 @@
   //
   // Источники подключаются через window.HomeSrc[имя] = { resume(rec, movie, media, ok, fail) }; запись делает общий перехват плеера.
   window.HomeSrc = window.HomeSrc || {};
-  var NAMES = { kinopub: 'Кинопаб', anime: 'Аниме', wrestling: 'Wrestling', local: 'Локальная библиотека', url: 'Торрент' };
-  var ALT_BTN = { kinopub: '.view--kinopub', anime: '.view--anime', local: '.view--local', url: '.view--torrent', torrent: '.view--torrent' };
+  var NAMES = { kinopub: 'Кинопаб', anime: 'Аниме', wrestling: 'Wrestling', local: 'Локальная библиотека', url: 'Торрент', lift: 'Lift' };
+  var ALT_BTN = { kinopub: '.view--kinopub', anime: '.view--anime', local: '.view--local', url: '.view--torrent', torrent: '.view--torrent', lift: '.view--lift' };
 
   function noty(t) { try { Lampa.Noty.show(t); } catch (e) {} }
   function fmt(sec) {
@@ -153,6 +153,7 @@
       var m = MAP[String(h)]; if (!m) return null;
       // список серий раздачи здесь НЕ повторяется: он передаётся плееру один раз на запуск (resume_playlist), у серии только её номер в нём (pi)
       var hs = m.hs, multi = hs.src === 'url' && m.many;
+      if (hs.src === 'lift') return JSON.parse(JSON.stringify({ src: 'lift', item: hs.item, season: hs.season, ep: hs.ep, voice_name: hs.voice_name, codec: 'vp9', edition: hs.edition, binding_revision: hs.binding_revision, title: m.title }));
       var r = { src: hs.src, item: hs.item, season: hs.season, ep: hs.ep, release: hs.release, voice: hs.voice, url: hs.src === 'url' && !(multi && String(hs.url || '').length <= 300) ? hs.url : undefined, q: hs.q || undefined, title: m.title, pi: multi ? m.pi : undefined, magnet: hs.magnet || undefined, infohash: hs.infohash || undefined };
       return JSON.parse(JSON.stringify(r));
     } catch (e) { return null; }
@@ -214,7 +215,7 @@
     SENT[m.card] = { t: now, h: tl.hash, done: done, plOk: last && last.h === tl.hash && last.plOk };
     var hs = m.hs;
     post(m.card, {
-      src: hs.src, item: hs.item, season: hs.season, ep: hs.ep, release: hs.release, voice: hs.voice, url: hs.src === 'url' ? hs.url : undefined, magnet: hs.magnet || undefined, infohash: hs.infohash || undefined,
+      src: hs.src, item: hs.item, season: hs.season, ep: hs.ep, release: hs.release, voice: hs.voice, voice_name: hs.voice_name, codec: hs.codec, edition: hs.edition, binding_revision: hs.binding_revision, url: hs.src === 'url' ? hs.url : undefined, magnet: hs.magnet || undefined, infohash: hs.infohash || undefined,
       pl: hs.pl && firstForHash ? hs.pl : undefined, idx: hs.pl && firstForHash ? hs.idx : undefined, plKeep: hs.pl && !firstForHash ? true : undefined,
       q: hs.q || undefined, title: m.title, pos: Math.round(tl.time || 0), dur: Math.round(tl.duration || 0), done: done, hash: String(tl.hash), at: (tl.home_native && tl.updated) ? tl.updated : now
     }, function () { var s = SENT[m.card]; if (s && s.h === tl.hash) s.plOk = true; });
@@ -244,7 +245,7 @@
     try { prev = Lampa.Controller.enabled().name || 'content'; } catch (e) {}
     var failedBtn = ALT_BTN[rec.src];
     var items = [];
-    [['.view--kinopub', 'Кинопаб'], ['.view--anime', 'Аниме (AniLibria / AnimeLib)'], ['.view--local', 'Локальная библиотека'], ['.view--torrent', 'Торренты']].forEach(function (a) {
+    [['.view--kinopub', 'Кинопаб'], ['.view--anime', 'Аниме (AniLibria / AnimeLib)'], ['.view--local', 'Локальная библиотека'], ['.view--torrent', 'Торренты'], ['.view--lift', 'Lift']].forEach(function (a) {
       if (a[0] !== failedBtn && render.find(a[0]).length) items.push({ title: 'Играть · ' + a[1], sel: a[0] });
     });
     if (failedBtn && render.find(failedBtn).length) items.push({ title: 'Выбрать вручную · ' + (NAMES[rec.src] || rec.src), sel: failedBtn });

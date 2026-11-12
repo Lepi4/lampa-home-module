@@ -2973,7 +2973,7 @@ class MainActivity : BaseActivity(),
                 put("component", "home_file"); put("source", "home_file"); put("url", videoUrl)
             }.toString() else activity?.takeIf { it.isNotEmpty() } ?: lampaActivity
 
-            Log.i(TAG, "runPlayer: url=${videoUrl.take(70)} keys=${jsonObject.keys().asSequence().toList()} home_player=${jsonObject.opt("home_player")} launchPlayer='$launchPlayer' appPlayer='${appPlayer}' prefs=$mcPrefPlayer/$mcPrefTorrent")
+            Log.i(TAG, "runPlayer: url=${if(jsonObject.optString("home_source")=="lift") "[lift]" else videoUrl.take(70)} keys=${jsonObject.keys().asSequence().toList()} home_player=${jsonObject.opt("home_player")} launchPlayer='$launchPlayer' appPlayer='${appPlayer}' prefs=$mcPrefPlayer/$mcPrefTorrent")
             // Pre-compute frequently used values
             val isIPTV = jsonObject.optBoolean("iptv", false)
             val isLIVE = jsonObject.optBoolean("need_check_live_stream", false)
@@ -2988,7 +2988,7 @@ class MainActivity : BaseActivity(),
                     Log.i(TAG, "mc плеер: torrent=$isTorrentLaunch pref=$pref url=${videoUrl.take(60)}")
                     pref.isNotEmpty() && pref != "android"
                 } else false
-            val selectedPlayer = if(ProfileRuntime.enabled()&&ProfileRuntime.isChild()) packageName else launchPlayer.takeIf { it.isNotBlank() }
+            val selectedPlayer = if(jsonObject.optString("home_source")=="lift" || (ProfileRuntime.enabled()&&ProfileRuntime.isChild())) packageName else launchPlayer.takeIf { it.isNotBlank() }
                 ?: (if (isIPTV || isLIVE) tvPlayer else appPlayer).takeIf { !it.isNullOrBlank() }
                 ?: (if (isIPTV || isLIVE || homePlayer) null else listOf("net.gtvbox.videoplayer", "net.gtvbox.vimuhd")
                     .firstOrNull { pkg -> try { packageManager.getPackageInfo(pkg, 0); true } catch (_: Exception) { false } })
@@ -3040,6 +3040,8 @@ class MainActivity : BaseActivity(),
                     // кино и сериалы: ключ тайтла для памяти звуковой дорожки на сервере, адрес сервера и предел качества профиля устройства
                     jsonObject.optString("audio_key").takeIf { it.isNotBlank() }?.let { put("audio_key", it) }
                     jsonObject.optString("home_base").takeIf { it.isNotBlank() }?.let { put("home_base", it) }
+                    for (key in listOf("home_source", "home_mime", "lift_voice_rep", "lift_audio_map", "lift_video_formats", "lift_binding_revision"))
+                        jsonObject.optString(key).takeIf { it.isNotBlank() }?.let { put(key, it) }
                     if(jsonObject.has("home_clock_ms")){put("home_clock_ms",jsonObject.optLong("home_clock_ms"));put("home_clock_elapsed",android.os.SystemClock.elapsedRealtime())}
                     jsonObject.optString("home_tv_channel").takeIf { it.isNotBlank() }?.let { put("home_tv_channel", it) }
                     jsonObject.optString("home_auto_attempt").takeIf { it.isNotBlank() }?.let { put("home_auto_attempt", it) }
@@ -3703,6 +3705,8 @@ class MainActivity : BaseActivity(),
                 (state.extras["tv_dev"] as? String)?.let { putExtra("tv_dev", it) }
                 (state.extras["audio_key"] as? String)?.let { putExtra("audio_key", it) }
                 (state.extras["home_base"] as? String)?.let { putExtra("home_base", it) }
+                for (key in listOf("home_source", "home_mime", "lift_voice_rep", "lift_audio_map", "lift_video_formats", "lift_binding_revision"))
+                    (state.extras[key] as? String)?.let { putExtra(key, it) }
                 (state.extras["home_clock_ms"] as? Number)?.let { putExtra("home_clock_ms",it.toLong()) }
                 (state.extras["home_clock_elapsed"] as? Number)?.let { putExtra("home_clock_elapsed",it.toLong()) }
                 (state.extras["home_tv_channel"] as? String)?.let { putExtra("home_tv_channel", it) }
@@ -4168,6 +4172,11 @@ class MainActivity : BaseActivity(),
             val owner=ProfileRuntime.snapshot()
             val meta=try { org.json.JSONArray(intent.getStringExtra("tl_meta") ?: "[]") } catch (_: Exception) { org.json.JSONArray() }
             val body=org.json.JSONObject().put("card",meta.optJSONObject(0)?.optString("c").orEmpty()).put("youtube_id",intent.getStringExtra("home_youtube_id").orEmpty()).put("tv_channel",(intent.getStringExtra("home_tv_channel") ?: intent.getStringExtra("tv_now_url")?.let { android.net.Uri.parse(it).getQueryParameter("id") }).orEmpty())
+            if(intent.getStringExtra("home_source")=="lift") {
+                val r=meta.optJSONObject(0)?.optJSONObject("r")
+                body.put("source","lift").put("binding_revision",intent.getStringExtra("lift_binding_revision"))
+                    .put("season",r?.optInt("season",0)?:0).put("episode",r?.optInt("ep",0)?:0)
+            }
             Thread {
                 var code=0
                 var error=""
@@ -4193,7 +4202,7 @@ class MainActivity : BaseActivity(),
         }
         playbackUiOwner=ProfileRuntime.scopeKey("playback_ui")
         try {
-            debugLogIntentData(TAG, intent)
+            if(intent.getStringExtra("home_source")!="lift")debugLogIntentData(TAG, intent)
             // Mark that the upcoming onPause() is caused by launching our external player,
             // so we can keep the WebView JS timers (RCH socket heartbeat) alive.
             isPlayerLaunching = true
