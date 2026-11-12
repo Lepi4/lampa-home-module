@@ -108,16 +108,25 @@
     failed:function(data,message){if(this.valid(data))finish(active,false,message);}};
   window.HomeSrc=window.HomeSrc||{};
   HomeSrc.lift={resume:function(rec,card,media,ok,fail){open(card,media,rec,ok,fail);},cancel:cancel};
+  function addButton(card,media,render){
+    if(!window.__home_lift_enabled||!card||!render||typeof render.find!=='function')return;
+    if(typeof media!=='string'||!/^(movie|tv)$/.test(media))media=card.media_type||((card.name||card.original_name)?'tv':'movie');
+    if(!/^(movie|tv)$/.test(media)||!/^\d+$/.test(String(card.id))||card.source==='wrestling'||render.find('.view--lift').length)return;
+    var button=$('<div class="full-start__button selector view--lift"><span>Lift</span></div>');
+    button.on('hover:enter',function(){open(card,media,null);});
+    // The source menu reads the container holding Torrent/KinoPub, not the first button bar.
+    var anchor=render.find('.view--torrent, .view--kinopub').first();
+    if(anchor.length)anchor.after(button);
+    else render.find('.buttons--container, .full-start__buttons, .full-start-new__buttons').first().append(button);
+    try{if(button.is(':visible'))Lampa.Controller.collectionAppend(button);}catch(ignore){}
+  }
   function hook(){
     Lampa.Listener.follow('full',function(e){
-      if(e.type!=='complite'||!e.data||!e.data.movie||!window.__home_lift_enabled)return;
-      var card=e.data.movie,media=e.object&&e.object.method||((card.name||card.original_name)?'tv':'movie');
-      if(!/^(movie|tv)$/.test(media)||!/^\d+$/.test(String(card.id))||card.source==='wrestling')return;
-      var render=e.object.activity.render();if(render.find('.view--lift').length)return;
-      var button=$('<div class="full-start__button selector view--lift"><span>Lift</span></div>');
-      button.on('hover:enter',function(){open(card,media,null);});
-      render.find('.full-start__buttons, .buttons--container').first().append(button);
+      if(e.type!=='complite'||!e.data||!e.data.movie)return;
+      var o=e.object;if(o&&o.activity)addButton(e.data.movie,o.method,o.activity.render());
     });
+    // A newly installed plugin can arrive after the current full-card completion event.
+    var a=current();if(a&&a.component==='full'&&a.activity)addButton(a.card||a.movie,a.method,a.activity.render());
   }
   if(window.appready)hook();else Lampa.Listener.follow('app',function(e){if(e.type==='ready')hook();});
 })();
