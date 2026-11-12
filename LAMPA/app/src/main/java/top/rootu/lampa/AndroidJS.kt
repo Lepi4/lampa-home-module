@@ -245,6 +245,25 @@ class AndroidJS(private val mainActivity: MainActivity, private val browser: Bro
 
     @JavascriptInterface
     @org.xwalk.core.JavascriptInterface
+    fun tlPendingOwned(context: String): String {
+        return try {
+            val owner=JSONObject(context)
+            val current=top.rootu.lampa.ProfileRuntime.snapshot()
+            val base=MainActivity.LAMPA_URL.trimEnd('/')
+            if(owner.optString("server_base").trimEnd('/')!=base ||
+                owner.optJSONObject("profile")?.optString("id")!=current.optJSONObject("profile")?.optString("id") ||
+                owner.optString("token")!=current.optString("token"))
+                return JSONObject().put("error","owner_changed").toString()
+            top.rootu.lampa.player.ProgressOutbox.init(mainActivity)
+            val profile=owner.optJSONObject("profile")?.optString("id").orEmpty().ifBlank{"u_default"}
+            val pending=top.rootu.lampa.player.ProgressOutbox.pendingFor(base,profile)
+            if(pending)top.rootu.lampa.player.ProgressOutbox.flush(base)
+            JSONObject().put("pending",pending).toString()
+        } catch (_: Exception) {JSONObject().put("error","queue_unavailable").toString()}
+    }
+
+    @JavascriptInterface
+    @org.xwalk.core.JavascriptInterface
     fun tlEnqueueOwned(json: String, context: String): Boolean {
         return try {
             val owner=org.json.JSONObject(context)

@@ -3040,6 +3040,7 @@ class MainActivity : BaseActivity(),
                     // кино и сериалы: ключ тайтла для памяти звуковой дорожки на сервере, адрес сервера и предел качества профиля устройства
                     jsonObject.optString("audio_key").takeIf { it.isNotBlank() }?.let { put("audio_key", it) }
                     jsonObject.optString("home_base").takeIf { it.isNotBlank() }?.let { put("home_base", it) }
+                    if(jsonObject.has("home_clock_ms")){put("home_clock_ms",jsonObject.optLong("home_clock_ms"));put("home_clock_elapsed",android.os.SystemClock.elapsedRealtime())}
                     jsonObject.optString("home_tv_channel").takeIf { it.isNotBlank() }?.let { put("home_tv_channel", it) }
                     jsonObject.optString("home_auto_attempt").takeIf { it.isNotBlank() }?.let { put("home_auto_attempt", it) }
                     jsonObject.optString("home_auto_profile").takeIf { it.isNotBlank() }?.let { put("home_auto_profile", it) }
@@ -3702,6 +3703,8 @@ class MainActivity : BaseActivity(),
                 (state.extras["tv_dev"] as? String)?.let { putExtra("tv_dev", it) }
                 (state.extras["audio_key"] as? String)?.let { putExtra("audio_key", it) }
                 (state.extras["home_base"] as? String)?.let { putExtra("home_base", it) }
+                (state.extras["home_clock_ms"] as? Number)?.let { putExtra("home_clock_ms",it.toLong()) }
+                (state.extras["home_clock_elapsed"] as? Number)?.let { putExtra("home_clock_elapsed",it.toLong()) }
                 (state.extras["home_tv_channel"] as? String)?.let { putExtra("home_tv_channel", it) }
                 (state.extras["home_auto_attempt"] as? String)?.let { putExtra("home_auto_attempt", it) }
                 (state.extras["home_auto_profile"] as? String)?.let { putExtra("home_auto_profile", it) }
@@ -4166,13 +4169,25 @@ class MainActivity : BaseActivity(),
             val meta=try { org.json.JSONArray(intent.getStringExtra("tl_meta") ?: "[]") } catch (_: Exception) { org.json.JSONArray() }
             val body=org.json.JSONObject().put("card",meta.optJSONObject(0)?.optString("c").orEmpty()).put("youtube_id",intent.getStringExtra("home_youtube_id").orEmpty()).put("tv_channel",(intent.getStringExtra("home_tv_channel") ?: intent.getStringExtra("tv_now_url")?.let { android.net.Uri.parse(it).getQueryParameter("id") }).orEmpty())
             Thread {
-                var allowed=false
+                var code=0
+                var error=""
                 try {
                     val c=java.net.URL(owner.optString("server_base")+"/home/play/authorize").openConnection() as java.net.HttpURLConnection
                     c.requestMethod="POST";c.doOutput=true;c.connectTimeout=3000;c.readTimeout=12000;c.setRequestProperty("Content-Type","application/json");c.setRequestProperty("X-Home-Session",owner.optString("token"))
-                    c.outputStream.use { it.write(body.toString().toByteArray()) };allowed=c.responseCode==200;c.disconnect()
-                } catch (_: Exception) { }
-                runOnUiThread { if(ProfileRuntime.contextJson()!=owner.toString())return@runOnUiThread;if(allowed)launchPlayer(intent,true)else App.toast("Просмотр не разрешён в этом профиле",true) }
+                    c.outputStream.use { it.write(body.toString().toByteArray()) }
+                    code=c.responseCode
+                    if(code!=200) try { error=c.errorStream?.bufferedReader()?.use { r->r.readText() }.orEmpty() } catch (_: Exception) { }
+                    c.disconnect()
+                } catch (_: Exception) { code=-1 }
+                runOnUiThread {
+                    if(ProfileRuntime.contextJson()!=owner.toString()) return@runOnUiThread
+                    when {
+                        code==200 -> launchPlayer(intent,true)
+                        code==401 -> App.toast("Сессия истекла — откройте профиль заново",true)
+                        code==403 -> App.toast(if(error.contains("source_disabled")) "Источник выключен в профиле" else "Просмотр не разрешён в этом профиле",true)
+                        else -> App.toast("Проверка доступа недоступна — повторите",true)
+                    }
+                }
             }.start()
             return
         }

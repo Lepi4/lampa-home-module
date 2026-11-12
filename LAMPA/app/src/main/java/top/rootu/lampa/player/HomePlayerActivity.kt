@@ -219,12 +219,13 @@ class HomePlayerActivity : Activity() {
     private val tlDur = HashMap<Int, Long>()       // известная длительность элементов, мс
     private val tlPos = HashMap<Int, Long>()       // последняя известная позиция, мс
     private val tlSentPos = HashMap<Int, Long>()   // позиция, которая уже отправлена: повтор той же позиции новым событием не считается
-    private val tlSession = System.currentTimeMillis()   // идентификатор сеанса просмотра (защита от запоздавшего отчёта того же сеанса)
+    private val tlSession = "p" + java.util.UUID.randomUUID().toString().replace("-", "")   // идентификатор сеанса просмотра (защита от запоздавшего отчёта того же сеанса)
     private val tlLastU = HashMap<String, Long>()           // хеш серии -> время её последнего действия (мс): страница Lampa получает его вместе с итогом, а не «время закрытия плеера»
     private var tlSeq = 0L                                  // номер действия внутри сеанса: event = сеанс:номер, повтор отправки несёт тот же event
     private val tlDoneSent = HashSet<Int>()                 // серии, уже отправленные как «досмотрено» в этом сеансе: повтор не создаёт нового действия
     private val tlAutoDone = ArrayList<String>()   // серии, реально досмотренные до конца с автопереходом: приложение отмечает только их
     private val RESUME_MAX = 30_000
+    private var progressClock = ProgressClock(System.currentTimeMillis())
     private val tlTick = object : Runnable {
         override fun run() {
             if (finished || !::player.isInitialized) return
@@ -259,21 +260,33 @@ class HomePlayerActivity : Activity() {
     // чтобы текущая и следующая серии остались (сначала уходят дальние элементы). Размер согласован с серверным пределом.
     private fun buildResume(r0: JSONObject?): JSONObject? {
         r0 ?: return null
-        val r = JSONObject(r0.toString())
-        val list = resumeList
-        val pi = if (r.has("pi")) r.optInt("pi", -1) else -1
+        val r=JSONObject(r0.toString())
+        val pi=if(r.has("pi"))r.optInt("pi",-1)else -1
         r.remove("pi")
-        if (list != null && pi in 0 until list.length() && r.optString("src") == "url") {
-            if (r.optString("url").isBlank()) r.put("url", list.optJSONObject(pi)?.optString("u") ?: "")
-            val from = maxOf(0, pi - 5); val to = minOf(list.length(), pi + 45)
-            val pl = JSONArray()
-            for (k in from until to) list.optJSONObject(k)?.let { pl.put(it) }
-            var idx = pi - from
-            while (pl.length() > 2 && r.toString().length + pl.toString().length > RESUME_MAX) {
-                if (idx > 0) { pl.remove(0); idx-- } else pl.remove(pl.length() - 1)
-            }
-            r.put("pl", pl); r.put("idx", idx)
+        if(r.optString("src")!="url" || pi !in chUris.indices)return r
+        r.remove("pl");r.remove("idx")
+        r.put("url",chUris[pi])
+        val from=maxOf(0,pi-5);val to=minOf(chUris.size,pi+45)
+        val list=JSONArray()
+        for(k in from until to) {
+            val old=resumeList?.optJSONObject(k)
+            val meta=tlMeta?.optJSONObject(k)
+            val resume=meta?.optJSONObject("r")
+            val entry=JSONObject().put("u",chUris[k])
+                .put("t",(old?.optString("t")?.takeIf{it.isNotBlank()} ?: names.getOrNull(k).orEmpty()).take(100))
+                .put("h",meta?.optString("h") ?: old?.optString("h").orEmpty())
+            val season=resume?.optInt("season",0)?.takeIf{it>0} ?: old?.optInt("s",0) ?: 0
+            val episode=resume?.optInt("ep",0)?.takeIf{it>0} ?: old?.optInt("e",0) ?: 0
+            if(season in 1..999 && episode in 1..9999)entry.put("s",season).put("e",episode)
+            list.put(entry)
         }
+        var idx=pi-from
+        while(list.length()>2 && r.toString().length+list.toString().length>RESUME_MAX) {
+            if(idx>0){list.remove(0);idx--}else list.remove(list.length()-1)
+        }
+        var fits=r.toString().length+list.toString().length<=RESUME_MAX
+        for(k in 0 until list.length())if(list.getJSONObject(k).optString("u").length>2048)fits=false
+        if(fits)r.put("pl",list).put("idx",idx)
         return r
     }
 
@@ -300,7 +313,7 @@ class HomePlayerActivity : Activity() {
             // единое правило (сервер и страница — то же): дошли до конца, ≥90% или титры: остаток не больше min(10 мин, 12% длительности) после половины
             val done = (ended && dur > 0) || (dur > 0 && (pos >= dur * 0.90 || (dur - pos <= minOf(600_000L, dur * 12 / 100) && pos >= dur / 2)))
             if (done && i in tlDoneSent) continue                        // «досмотрено» уже отправлено: повтор того же состояния — не действие
-            val nowU = System.currentTimeMillis()
+            val nowU = progressClock.next()
             val hh = m.optString("h")
             commit.add { if (done) tlDoneSent.add(i) else tlDoneSent.remove(i); tlSentPos[i] = pos; tlLastU[hh] = nowU }
             rows.put(JSONObject().apply {
@@ -451,6 +464,8 @@ class HomePlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val clockDelay=(android.os.SystemClock.elapsedRealtime()-intent.getLongExtra("home_clock_elapsed",android.os.SystemClock.elapsedRealtime())).coerceAtLeast(0)
+        progressClock=ProgressClock(intent.getLongExtra("home_clock_ms",System.currentTimeMillis())+clockDelay)
         homeBase = (intent.getStringExtra("home_base") ?: "").trimEnd('/')
         homeOwner = try { intent.getStringExtra("home_user_context")?.let { JSONObject(it) } } catch (_: Exception) { null }
         top.rootu.lampa.RemindWatcher.videoPlayer = java.lang.ref.WeakReference(this)

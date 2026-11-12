@@ -47,6 +47,7 @@ class FrameClock(
     private var temp: Double? = null
     private var condition = "neutral"
     private var started = false
+    @Volatile private var stopped = true
     private var minuteTicks = 0
     private val tick = object : Runnable {
         override fun run() {
@@ -64,8 +65,10 @@ class FrameClock(
     fun start(onDecision: (Boolean) -> Unit) {
         if (started) return
         started = true
+        stopped = false
         Thread {
             val on = readEnabled()
+            if (stopped) return@Thread
             visible = on
             if (on) {
                 refreshWeather()
@@ -77,6 +80,8 @@ class FrameClock(
     }
 
     fun stop() {
+        stopped = true
+        started = false
         visible = false
         ui.removeCallbacks(tick)
     }
@@ -120,7 +125,7 @@ class FrameClock(
             }
             c.disconnect()
         } catch (_: Exception) {}
-        ui.postDelayed({ if (visible) Thread { refreshWeather() }.apply { isDaemon = true }.start() }, 15 * 60_000)
+        ui.postDelayed({ if (!stopped && visible) Thread { refreshWeather() }.apply { isDaemon = true }.start() }, 15 * 60_000)
     }
 
     private fun redraw() {

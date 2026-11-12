@@ -61,8 +61,6 @@ object ProgressOutbox {
         return a.compareTo(b)
     }
     private fun cmpPair(u1: Long, e1: String, u2: Long, e2: String): Int {
-        val p1 = parts(e1); val p2 = parts(e2)
-        if (p1 != null && p2 != null && p1.first == p2.first) return cmpEvent(e1, e2)
         return if (u1 != u2) u1.compareTo(u2) else cmpEvent(e1, e2)
     }
     private fun evOf(r: JSONObject) = r.optString("event")
@@ -259,6 +257,16 @@ object ProgressOutbox {
         return ok
     }
 
+    fun pendingFor(base: String, profile: String): Boolean = synchronized(lock) {
+        val q=load()
+        if(unreadable) return@synchronized true
+        for(k in q.keys()) {
+            val r=q.optJSONObject(k)?:continue
+            if(r.optString("_base")==base && r.optString("_profile","u_default")==profile) return@synchronized true
+        }
+        false
+    }
+
     /** Дослать накопленное (вызывается при открытии приложения и плеера). */
     fun flush(base: String) { synchronized(lock) { noteBase(base) }; kick() }
 
@@ -323,10 +331,10 @@ object ProgressOutbox {
                 val rows = JSONArray()
                 for (k in chunk) {
                     val src = snapshot.getJSONObject(k)
-                    rows.put(JSONObject(src.toString()).apply { remove("_base"); remove("_n"); remove("_t"); remove("ended"); remove("_owner"); remove("_profile"); remove("origin_unknown") })
+                    rows.put(JSONObject(src.toString()).apply { remove("_base"); remove("_n"); remove("_t"); remove("ended"); remove("_owner"); remove("_profile"); remove("origin_unknown"); remove("_resume_n") })
                 }
                 var code: Int
-                val acked = HashMap<String, String>()          // "h|event" -> статус из ответа сервера
+                val acked = HashMap<String, JSONObject>()          // "h|event" -> статус из ответа сервера
                 try {
                     val c = URL("$base/home/tl/set").openConnection() as HttpURLConnection
                     c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 5000; c.readTimeout = 10000
@@ -341,7 +349,7 @@ object ProgressOutbox {
                     jb?.optJSONArray("results")?.let { ra ->
                         for (i in 0 until ra.length()) {
                             val o = ra.optJSONObject(i) ?: continue
-                            acked[o.optString("h") + "|" + (if (o.isNull("event")) "" else o.optString("event"))] = o.optString("status")
+                            acked[o.optString("h") + "|" + (if (o.isNull("event")) "" else o.optString("event"))] = o
                         }
                     }
                     c.disconnect()
@@ -355,7 +363,14 @@ object ProgressOutbox {
                         val cur = now.optJSONObject(k) ?: continue
                         if (evOf(cur) != evOf(sent)) { again = true; continue }      // за это время появилось новее — оно уйдёт следующим проходом
                         // подтверждение ищем по собственному событию (h + event), а не по номеру в ответе
-                        val st = acked[sent.optString("h") + "|" + sent.optString("event")]
+                        val ack = acked[sent.optString("h") + "|" + sent.optString("event")]
+                        val st = ack?.optString("status")
+                        if(st in listOf("accepted","duplicate") && ack?.optBoolean("resume_ignored",false)==true) {
+                            if(cur.optInt("_resume_n",0)==0 && compactResume(cur)) {
+                                cur.put("_resume_n",1);again=true
+                            } else {archive(k,cur,"resume_ignored");now.remove(k)}
+                            continue
+                        }
                         DLog.log(if (st == null || st == "invalid") "w" else "i", "outbox_ack", st ?: (if (code == -1) "net_error" else "no_ack:$code"), "")
                         when {
                             st == "accepted" || st == "duplicate" || st == "stale" -> { now.remove(k); markDelivered(k + "#" + evOf(cur)) }
@@ -374,6 +389,21 @@ object ProgressOutbox {
         }
         checkWaiters()
         if (again) scheduleRetry() else retryMs = 15_000L
+    }
+
+    private fun compactResume(row: JSONObject): Boolean {
+        val original=row.optJSONObject("resume")?:return false
+        val compact=JSONObject()
+        for(k in listOf("src","item","season","ep","release","voice","q","title","magnet","infohash"))
+            if(original.has(k)) compact.put(k,original.get(k))
+        val url=original.optString("url").ifBlank {
+            original.optJSONArray("pl")?.optJSONObject(original.optInt("idx",-1))?.optString("u").orEmpty()
+        }
+        if(url.isNotBlank())compact.put("url",url)
+        if(compact.optString("src").isBlank() || compact.toString().length>30_000)return false
+        if(compact.optString("src")=="url" && url.isBlank())return false
+        row.put("resume",compact)
+        return true
     }
 
     private fun scheduleRetry() {
