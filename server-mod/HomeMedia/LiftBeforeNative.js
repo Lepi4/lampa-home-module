@@ -10,7 +10,8 @@ window.__home_lift_before_native=function(data,next,fail){
   function post(path,body,success){
     var xhr=$.ajax({url:data.home_base+path,type:'POST',data:JSON.stringify(body),
       contentType:'application/json',dataType:'json',timeout:45000,cache:false,
-      headers:{'X-Home-Session':HomeUser.owner.token},success:function(result){if(valid())success(result);},
+      // The common profile XHR wrapper supplies the session exactly once.
+      success:function(result){if(valid())success(result);},
       error:function(){if(valid())fail('Не удалось подготовить видео Lift');}});
     HomeLift.track(xhr);
   }

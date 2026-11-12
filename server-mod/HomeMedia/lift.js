@@ -11,7 +11,8 @@
     if(!c.attempt.valid())return;
     var xhr=$.ajax({url:BASE+path,type:body?'POST':'GET',data:body?JSON.stringify(body):undefined,
       contentType:body?'application/json':undefined,dataType:'json',timeout:45000,cache:false,
-      headers:{'X-Home-Session':c.owner.token},
+      // profile-start/profiles-web already attach the frozen page owner's session.
+      // Repeating setRequestHeader combines values and makes the session invalid.
       success:function(r){if(c.attempt.valid())ok(r);},
       error:function(x){if(!c.attempt.valid())return;var code=x.responseJSON&&x.responseJSON.error;finish(c,false,code||'Lift не отвечает');}});
     manager.requests.push(xhr);
@@ -112,7 +113,7 @@
     if(!window.__home_lift_enabled||!card||!render||typeof render.find!=='function')return;
     if(typeof media!=='string'||!/^(movie|tv)$/.test(media))media=card.media_type||((card.name||card.original_name)?'tv':'movie');
     if(!/^(movie|tv)$/.test(media)||!/^\d+$/.test(String(card.id))||card.source==='wrestling'||render.find('.view--lift').length)return;
-    var button=$('<div class="full-start__button selector view--lift"><span>Lift</span></div>');
+    var button=$('<div class="full-start__button selector view--lift"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="m10 8 6 4-6 4Z" fill="currentColor"/></svg><span>Lift</span></div>');
     button.on('hover:enter',function(){open(card,media,null);});
     // The source menu reads the container holding Torrent/KinoPub, not the first button bar.
     var anchor=render.find('.view--torrent, .view--kinopub').first();
