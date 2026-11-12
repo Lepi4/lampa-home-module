@@ -29,12 +29,19 @@
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  var playGen = 0, playXhr = null;
   function play(id, title) {
+    var gen = ++playGen;
+    if (playXhr) { try { playXhr.abort(); } catch (e) {} playXhr = null; }
+    function stale() { return gen !== playGen; }
     var back = ctrl();
-    api('/vk/video?id=' + encodeURIComponent(id) + '&maxh=' + maxH(), function (d) {
+    playXhr = api('/vk/video?id=' + encodeURIComponent(id) + '&maxh=' + maxH(), function (d) {
+      playXhr = null;
+      if (stale()) return;
       if (!d || !d.video) return noty('VK: нет подходящего MP4');
       var data = { url: d.video, title: title || d.title || 'VK Видео', headers: d.headers || {}, home_player: true, home_timeline_only: true, home_vk_id: d.id, home_base: BASE };
       function launch(progress) {
+        if (stale()) return;
         if (window.HomeUser && window.Lampa && Lampa.Utils && Lampa.Utils.hash) {
           var hash = String(Lampa.Utils.hash('vk:' + d.id));
           data.audio_key = 'vk_' + d.id;
@@ -44,9 +51,11 @@
         try { Lampa.Player.play(data); } catch (e) { noty('VK: не удалось запустить плеер'); }
         setTimeout(function () { try { Lampa.Controller.toggle(back); } catch (e) {} }, 700);
       }
-      if (window.HomeUser) api('/vk/progress?id=' + encodeURIComponent(d.id), launch, function () { launch(null); });
+      if (window.HomeUser) api('/vk/progress?id=' + encodeURIComponent(d.id), function (p) { if (!stale()) launch(p); }, function () { if (!stale()) launch(null); });
       else launch(null);
     }, function (x) {
+      playXhr = null;
+      if (stale()) return;
       var err = x && x.responseJSON && x.responseJSON.error;
       noty(err === 'no_supported_mp4' ? 'VK: нет MP4 в пределах качества' : err === 'rate_limited' ? 'VK: слишком много запросов' : 'VK: ролик не открылся');
     });

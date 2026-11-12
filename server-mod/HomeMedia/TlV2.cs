@@ -24,7 +24,7 @@ public static class TlV2
     // Режим: «legacy» — читатели берут штатный дамп TimeCode с наложением timeline; «unified» — единственный источник timeline (после переноса истории).
     public static bool Unified => HomeDb.Get("tl_mode") == "unified";
     // Поколение синхронизации: клиент с другим поколением получает полный снимок (курсоры s прежних последовательностей не сравниваются).
-    public static string Epoch => (HomeDb.Get("tl_epoch") ?? "1") + (Profiles.Enabled ? ":" + Profiles.CurrentId : "");
+    public static string Epoch => (HomeDb.Get("tl_epoch") ?? "1") + ":order2" + (Profiles.Enabled ? ":" + Profiles.CurrentId : "");
     static readonly Regex hashRx = new("^-?[0-9]{1,15}$");
     // Отметка «досмотрено» иногда приходит только с identity (tv-252105-s1e1) и пустой карточкой. Без карточки дамп её выбрасывал, и сериал оставался в «Моих».
     public static string CardFromIdentity(string id)
@@ -33,10 +33,12 @@ public static class TlV2
         if (tv.Success) return tv.Groups[1].Value + "_tv";
         var movie = Regex.Match(id ?? "", @"^movie-(\d+)$");
         if (movie.Success) return movie.Groups[1].Value + "_movie";
+        var vk = Regex.Match(id ?? "", @"^vk--?[0-9]{1,15}_[0-9]{1,15}$");
+        if (vk.Success) return "vk_" + id.Substring(3);
         return "";
     }
-    static readonly Regex cardRx = new("^([0-9]{1,12}_(tv|movie)|yt_[0-9A-Za-z_-]{11}|wr_[0-9A-Za-z_-]{1,80})$");
-    static readonly Regex idRx = new("^(movie-[0-9]{1,12}|tv-[0-9]{1,12}-s[0-9]{1,3}e[0-9]{1,4}|yt-[0-9A-Za-z_-]{11}|tl-[0-9A-Za-z_-]{1,20})$");
+    static readonly Regex cardRx = new("^([0-9]{1,12}_(tv|movie)|yt_[0-9A-Za-z_-]{11}|wr_[0-9A-Za-z_-]{1,80}|vk_-?[0-9]{1,15}_[0-9]{1,15})$");
+    static readonly Regex idRx = new("^(movie-[0-9]{1,12}|tv-[0-9]{1,12}-s[0-9]{1,3}e[0-9]{1,4}|yt-[0-9A-Za-z_-]{11}|tl-[0-9A-Za-z_-]{1,20}|vk--?[0-9]{1,15}_[0-9]{1,15})$");
     static readonly Regex evRx = new("^[0-9A-Za-z_.:-]{1,60}$");
     static readonly HashSet<string> ops = new() { "progress", "completed", "reset" };
 
@@ -87,6 +89,14 @@ public static class TlV2
         return q.Count == 0 ? null : Read(q[0]);
     }
 
+    public static Row Resolve(SqliteConnection c, string id, string hash, string card)
+    {
+        var q = HomeDb.Query(c, "SELECT " + Cols + " FROM timeline WHERE profile_id=@profile AND id=@id LIMIT 1", ("@id", id));
+        var r = q.Count == 0 ? Get(c, hash) : Read(q[0]);
+        if (r == null || (r.Id != null && r.Id != id)) return null;
+        return r.C == card || (r.C == "" && CardFromIdentity(r.Id) == card) ? r : null;
+    }
+
     public static List<Row> All(SqliteConnection c) => HomeDb.Query(c, "SELECT " + Cols + " FROM timeline WHERE profile_id=@profile").Select(Read).ToList();
 
     public static long MaxS(SqliteConnection c) => Convert.ToInt64(HomeDb.Query(c, "SELECT COALESCE(MAX(s),0) FROM timeline WHERE profile_id=@profile")[0][0]);
@@ -118,14 +128,14 @@ public static class TlV2
     static bool TryParts(string e, out long s, out long q)
     {
         s = q = 0;
+        if (string.IsNullOrEmpty(e)) return false;
         int i = e.LastIndexOf(':');
         return i > 0 && long.TryParse(e.Substring(0, i), out s) && long.TryParse(e.Substring(i + 1), out q);
     }
 
     public static int CmpPair(long u1, string e1, long u2, string e2)
     {
-        if (TryParts(e1, out long s1, out _) && TryParts(e2, out long s2, out _) && s1 == s2)
-            return CmpEvent(e1, e2);
+        // One transitive order for all actors and all delivery permutations.
         return u1 != u2 ? u1.CompareTo(u2) : CmpEvent(e1, e2);
     }
 
@@ -243,7 +253,7 @@ public static class TlV2
     // в режиме unified событие попадает в таблицу журнала. Ошибка любого действия откатывает всю пачку: подтверждение (accepted) означает, что всё выполнено.
     public static void InTx(SqliteConnection c, Row n)
     {
-        if (n.Op == "reset") LastPlayStore.ResetByHash(n.H, false, n.U);
+        if (n.Op == "reset") LastPlayStore.ResetAccepted(n);
         // реальный просмотр сериала сам создаёт постоянное отслеживание (раньше оно появлялось только при построении списка «Мои сериалы»);
         // ручное скрытие учитывается при показе: оно сравнивается с датой последнего просмотра
         if (n.Resume != null && n.Op != "reset") LastPlayStore.FromResume(n);
@@ -322,7 +332,7 @@ public static class TlV2
     // Применяет одно событие в рамках уже открытой транзакции.
     public static Result Apply(SqliteConnection c, Row n, ref long maxS, Action<Row> onAccepted = null)
     {
-        var res = new Result { H = n.H, Event = n.Event };
+        var res = new Result { H = n.H, Event = n.Event, ResumeIgnored = n.ResumeIgnored };
         var cur = Get(c, n.H);
         if (Profiles.Enabled && n.Id != null)
         {
@@ -384,7 +394,12 @@ public static class TlV2
             list.Add(res);
             if (inTx != null && res.Status == "accepted") inTx(c, n);
             // повтор уже принятого сброса: действие идемпотентно (условие по времени), поэтому «Продолжить» снимается и при duplicate
-            else if (inTx != null && res.Status == "duplicate" && n.Op == "reset") LastPlayStore.ResetByHash(n.H, false, n.U);
+            else if (inTx != null && res.Status == "duplicate" && n.Op == "reset") LastPlayStore.ResetAccepted(n);
+            else if (inTx != null && res.Status == "duplicate" && n.Resume != null) {
+                // Same event/position may carry repaired compact resume metadata.
+                n.S = res.S;
+                LastPlayStore.FromResume(n);
+            }
         }
         tx.Commit();
         }

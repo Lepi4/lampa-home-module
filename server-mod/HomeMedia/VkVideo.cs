@@ -35,6 +35,7 @@ public static class VkStore
     static JArray feedCache;
     static long feedAt;
     static string feedProfile;
+    static int feedCacheRev = -1;
 
     public static string Profile()
     {
@@ -475,12 +476,12 @@ public static class VkStore
     static async Task<List<JObject>> RawFeed(string profile)
     {
         int rev = feedRev;
-        if (feedCache != null && feedProfile == profile && feedAt > 0 && rev == feedRev && HomeDb.Now() - feedAt < 15 * 60_000)
+        if (feedCache != null && feedProfile == profile && feedAt > 0 && feedCacheRev == feedRev && HomeDb.Now() - feedAt < 15 * 60_000)
             return feedCache.Children<JObject>().ToList();
         await FeedGate.WaitAsync();
         try
         {
-            if (feedCache != null && feedProfile == profile && HomeDb.Now() - feedAt < 15 * 60_000 && rev == feedRev)
+            if (feedCache != null && feedProfile == profile && HomeDb.Now() - feedAt < 15 * 60_000 && feedCacheRev == feedRev)
                 return feedCache.Children<JObject>().ToList();
             var rows = new List<JObject>();
             foreach (var sub in Subs(profile).Children<JObject>())
@@ -509,7 +510,7 @@ public static class VkStore
                 catch { }
             }
             var fresh = new JArray(rows.GroupBy(x => (string)x["id"]).Select(g => g.First()).OrderByDescending(x => (long?)x["date"] ?? 0).Take(80));
-            if (rev == feedRev) { feedCache = fresh; feedAt = HomeDb.Now(); feedProfile = profile; }
+            if (rev == feedRev) { feedCache = fresh; feedAt = HomeDb.Now(); feedProfile = profile; feedCacheRev = rev; }
             return fresh.Children<JObject>().ToList();
         }
         finally { FeedGate.Release(); }
@@ -606,22 +607,24 @@ public static class VkStore
     static async Task<List<JObject>> ReadAlbum(long owner, long album, string albumId, string title, int pages)
     {
         var rows = new List<JObject>();
+        var seen = new HashSet<string>();
         int offset = 0;
         for (int page = 0; page < pages; page++)
         {
             var response = await Api("video.getFromAlbum", new JObject { ["owner_id"] = owner, ["album_id"] = album, ["count"] = 50, ["offset"] = offset });
             var items = response?["items"] as JArray ?? new JArray();
-            int count = (int?)response?["count"] ?? items.Count;
             foreach (var item in items.Children<JObject>())
             {
                 var card = VideoCard(item);
                 if (card == null) continue;
+                string id = (string)card["id"];
+                if (!seen.Add(id)) continue;
                 card["album"] = albumId;
                 if (!string.IsNullOrEmpty(title)) card["album_title"] = title;
                 rows.Add(card);
             }
-            offset += items.Count;
-            if (items.Count == 0 || items.Count < 50 || offset >= count) break;
+            if (items.Count == 0) break;
+            offset += 50;   // шаг по запрошенному диапазону: короткая страница не означает конец альбома
         }
         return rows;
     }

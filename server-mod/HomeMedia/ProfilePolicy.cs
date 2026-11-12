@@ -21,7 +21,7 @@ public static class ProfilePolicy
 
     public enum AgeDecision { Allow, Deny, Pending }
 
-    static readonly Channel<string> ageQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(6) { FullMode = BoundedChannelFullMode.DropWrite });
+    static readonly Channel<string> ageQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(6) { FullMode = BoundedChannelFullMode.Wait });
     static readonly ConcurrentDictionary<string, byte> ageQueued = new();
     static readonly ConcurrentDictionary<string, long> ageBackoffUntil = new();
     static readonly ConcurrentDictionary<string, int> ageFailCount = new();
@@ -97,8 +97,9 @@ public static class ProfilePolicy
     }
 
     static bool IsYoutubeCard(JObject card) =>
-        card["youtube"] != null || card["video_id"] != null || card["channel_id"] != null
-        || (((string)card["id"] ?? "").StartsWith("UC")) || (((string)card["thumb"] ?? "").Contains("ytimg.com/"));
+        (string)card["source"] != "vk" && (string)card["provider"] != "vk" &&
+        (card["youtube"] != null || card["video_id"] != null || card["channel_id"] != null
+        || (((string)card["id"] ?? "").StartsWith("UC")) || (((string)card["thumb"] ?? "").Contains("ytimg.com/")));
 
     public static bool YoutubeAllows(JObject card)
     {

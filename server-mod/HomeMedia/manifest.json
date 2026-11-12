@@ -51,6 +51,7 @@
     "ProfilePolicy.cs",
     "ProfileMirror.cs",
     "ProfileAvailability.cs",
+    "ProgressResolve.cs",
     "AppUpdates.cs"
   ]
 }

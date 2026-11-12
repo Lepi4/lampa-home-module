@@ -624,13 +624,33 @@
     }
 
     // порядок событий — как на сервере: пустой < «сеанс:номер» по числам < прочее по ordinal
-    function evParts(e) { var i = e.lastIndexOf(':'); if (i <= 0) return null; var a = e.slice(0, i), b = e.slice(i + 1); if (a === '' || b === '' || isNaN(Number(a)) || isNaN(Number(b))) return null; return [Number(a), Number(b)]; }
+    // Match Int64.TryParse without floating-point rounding or BigInt.
+    function longText(x) {
+      if (!/^-?\d+$/.test(x)) return null;
+      var neg=x.charAt(0)==='-', v=(neg?x.slice(1):x).replace(/^0+(?=\d)/,'');
+      var cap=neg?'9223372036854775808':'9223372036854775807';
+      if(v.length>cap.length || (v.length===cap.length && v>cap))return null;
+      return (neg && v!=='0'?'-':'')+v;
+    }
+    function longCmp(a,b) {
+      if(a===b)return 0;
+      var an=a.charAt(0)==='-',bn=b.charAt(0)==='-';
+      if(an!==bn)return an?-1:1;
+      var av=an?a.slice(1):a,bv=bn?b.slice(1):b;
+      var c=av.length!==bv.length?(av.length<bv.length?-1:1):(av<bv?-1:1);
+      return an?-c:c;
+    }
+    function evParts(e) {
+      var i=e.lastIndexOf(':');if(i<=0)return null;
+      var a=longText(e.slice(0,i)),b=longText(e.slice(i+1));
+      return a===null||b===null?null:[a,b];
+    }
     function evRank(e) { return e === '' ? 0 : evParts(e) ? 1 : 2; }
     function cmpEvent(a, b) {
       a = a == null ? '' : String(a); b = b == null ? '' : String(b);
       if (a === b) return 0;
       var ra = evRank(a), rb = evRank(b); if (ra !== rb) return ra < rb ? -1 : 1;
-      if (ra === 1) { var x = evParts(a), y = evParts(b), c = x[0] !== y[0] ? (x[0] < y[0] ? -1 : 1) : (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0); if (c) return c; }
+      if (ra === 1) { var x = evParts(a), y = evParts(b), c = longCmp(x[0],y[0]) || longCmp(x[1],y[1]); if (c) return c; }
       return a < b ? -1 : 1;
     }
     function cmpPair(u1, e1, u2, e2) { return u1 !== u2 ? (u1 < u2 ? -1 : 1) : cmpEvent(e1, e2); }
@@ -788,7 +808,7 @@
       if (rejected && cmpPair(r.u, r.event, rejected.u, rejected.event) >= 0) delete s.rejected[r.h];
       var l = v[r.h], lu = (l && typeof l === 'object' && l.updated) || 0;
       var same = l && typeof l === 'object' && Math.abs((l.time || 0) - (r.t || 0)) <= 1 && Math.abs((l.percent || 0) - (r.p || 0)) < 0.1 && Math.abs((l.duration || 0) - (r.d || 0)) <= 1;
-      if (fullSnap ? (r.u === lu && same) : (r.u < Math.max(lu, 1) || (r.u === lu && same))) { delete s.projection[r.h]; return; }
+      if (r.u === lu && same) { delete s.projection[r.h]; return; }
       var row = { hash: r.h, percent: r.p, time: r.t, duration: r.d, updated: r.u, received: true };
       s.projection[r.h] = row; required.push(row);                      // полное содержимое сохраняется вместе с курсором и применяется отдельным обработчиком
     }
@@ -839,6 +859,17 @@
         if (fullSnap) setTimeout(push, 500);          // неотправленное повторяется сразу, не ожидая следующего круга
       }, error: function () { dl('w', 'tl_pull_error', '', ''); } });
     }
+
+    // A launch must not race locally pending user actions.
+    window.__home_tl_barrier = function (card) {
+      if(!tryOpen() || !flushMemCapture())return {ready:false};
+      if(!pulledOnce){pull();return {ready:false};}
+      drain();push();
+      var st=S.peek(),pending=false;
+      Object.keys(st.pending).forEach(function(h){var r=st.pending[h];if(!r.c||r.c===card)pending=true;});
+      Object.keys(memCapture).forEach(function(h){var r=memCapture[h];if(!r.c||r.c===card)pending=true;});
+      return {ready:!pending};
+    };
 
     // Применение сохранённых входящих значений к Lampa. Запись удаляется только после проверки фактического значения в file_view; ошибка оставляет её для повтора (в том числе после перезапуска).
     function verifyApplied(h, row) {
@@ -912,6 +943,59 @@
   }
 
   // ---------- параметры воспроизведения кино и сериалов: ключ тайтла (память звуковой дорожки) и профиль устройства ----------
+  // Read the selected episode immediately before handing it to Android.
+  (function () {
+    var serial=0;
+    function owner() {return window.HomeUser&&HomeUser.owner?JSON.stringify(HomeUser.owner):'';}
+    window.__home_prepare_progress=function(data,ok,fail) {
+      var mine=++serial;
+      if(!data||data.live||data.iptv||!data.tl_meta)return ok();
+      if(!window.HomeUser||!HomeUser.owner)return ok();
+      // Old APKs retain the old behavior until the new bridge is installed.
+      if(window.AndroidJS&&typeof AndroidJS.tlPendingOwned!=='function')return ok();
+      var meta;try{meta=JSON.parse(data.tl_meta);}catch(e){return fail('Не удалось определить серию');}
+      var hash=String(data.timeline&&data.timeline.hash||''),index=-1;
+      if(hash)meta.some(function(m,i){if(m&&String(m.h)===hash){index=i;return true;}});
+      if(index<0&&meta.length===1)index=0;
+      if(index<0)return fail('Не удалось определить выбранный файл');
+      var target=meta[index];
+      // This feature only changes existing TMDB playback, not standalone sources.
+      if(!target||!/^\d+_(tv|movie)$/.test(target.c||''))return ok();
+      var own=owner(),activity=Lampa.Activity.active(),attempts=0;
+      function valid(){return mine===serial&&owner()===own&&Lampa.Activity.active()===activity;}
+      function ready() {
+        var b=window.__home_tl_barrier&&window.__home_tl_barrier(target.c);
+        if(!b||!b.ready)return false;
+        if(window.__homeTlQ&&window.__homeTlQ.pending&&window.__homeTlQ.pending(target.c)){window.__homeTlQ.flush();return false;}
+        if(window.AndroidJS){var native=JSON.parse(AndroidJS.tlPendingOwned(own));if(native.error)throw Error(native.error);if(native.pending)return false;}
+        return true;
+      }
+      function poll() {
+        if(!valid())return;
+        try{if(!ready()){if(++attempts>40)return fail('Позиция ещё не синхронизирована. Повторите запуск.');return setTimeout(poll,200);}}
+        catch(e){return fail('Не удалось проверить сохранённую позицию');}
+        $.ajax({url:BASE+'/home/tl/resolve',type:'POST',contentType:'application/json',dataType:'json',timeout:8000,
+          data:JSON.stringify({id:target.id,h:String(target.h),c:target.c}),
+          success:function(result){
+            if(!valid())return;
+            try{if(!ready())return poll();}catch(e){return fail('Не удалось проверить сохранённую позицию');}
+            var profile=own?JSON.parse(own).profile:null;
+            if(profile&&result.profile_id!==profile.id)return fail('Профиль изменился. Повторите запуск.');
+            var row=result.row,old=data.timeline||{},tl;
+            if(row&&row.id&&row.id!==target.id)return fail('Получена позиция другой серии');
+            if(row)tl={hash:String(target.h),time:row.t||0,duration:row.d||0,percent:row.p||0,updated:row.u,received:true};
+            else tl={hash:String(target.h),time:old.time||0,duration:old.duration||0,percent:old.percent||0,updated:old.updated||0,received:true};
+            data.timeline=tl;
+            if(data.playlist&&data.playlist[index])data.playlist[index].timeline=tl;
+            data.home_clock_ms=result.now;
+            ok();
+          },error:function(){if(valid())fail('Не удалось получить сохранённую позицию. Повторите запуск.');}
+        });
+      }
+      poll();
+    };
+  })();
+
   (function playerExtras() {
     if (window.plugin_pextras_ready) return;
     window.plugin_pextras_ready = true;
@@ -979,7 +1063,9 @@
                 if (mh > 0) data.max_height = mh;
               }
             } catch (e) {}
-            return orig.apply(this, arguments);
+            var self=this,args=arguments;
+            if(typeof window.__home_prepare_progress!=='function')return orig.apply(self,args);
+            return window.__home_prepare_progress(data,function(){orig.apply(self,args);},function(message){try{Lampa.Noty.show(message);}catch(ignore){}});
           };
           Lampa.Android.__pxWrapped = true;
         }

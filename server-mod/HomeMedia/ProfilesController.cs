@@ -149,7 +149,7 @@ public class ProfilesController : BaseController
     {
         var user=Viewer();if(user==null)return J(new {error="session_required"},401);
         var b=await Body();var ids=b["identities"] as JArray;
-        if(ids==null||ids.Count==0||ids.Count>300||ids.Any(x=>x.Type!=JTokenType.String||x.ToString().Length>180))return J(new {error="bad_identities"},400);
+        if(ids==null||ids.Count==0||ids.Count>5000||ids.Any(x=>x.Type!=JTokenType.String||x.ToString().Length>180))return J(new {error="bad_identities"},400);
         string card=(string)b["card"];var m=Regex.Match(card??"",@"^(\d+)_(tv|movie)$");
         bool youtube=card?.StartsWith("yt_")==true&&YtStore.ValidId(card.Substring(3));
         if(youtube&&!ProfilePolicy.SourceEnabled("youtube"))return J(new{error="source_disabled",source="youtube"},403);

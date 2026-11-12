@@ -110,10 +110,12 @@ public static class HomeDb
     {
         if (conn != null) return;
         Directory.CreateDirectory(dir);
+        string durability = Environment.GetEnvironmentVariable("HOME_DB_SYNCHRONOUS") ?? "NORMAL";
+        if(durability != "NORMAL" && durability != "FULL") throw new InvalidOperationException("Invalid HOME_DB_SYNCHRONOUS");
         var c = new SqliteConnection("Data Source=" + path);
         c.Open();
         Exec(c, "PRAGMA journal_mode=WAL");
-        Exec(c, "PRAGMA synchronous=NORMAL");
+        Exec(c, "PRAGMA synchronous=" + durability);
         Exec(c, @"CREATE TABLE IF NOT EXISTS timeline (h TEXT PRIMARY KEY, c TEXT, t INTEGER, d INTEGER, p REAL, u INTEGER, s INTEGER);
                   CREATE INDEX IF NOT EXISTS ix_timeline_s ON timeline(s);
                   CREATE TABLE IF NOT EXISTS audio (k TEXT PRIMARY KEY, label TEXT, lang TEXT, at INTEGER);

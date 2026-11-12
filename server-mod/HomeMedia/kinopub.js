@@ -612,7 +612,7 @@
     return out;
   }
 
-  window.__homeTlQ = { post: postTl, flush: tlqFlush };          // для проверок: отправка отметки и сброс резервной очереди
+  window.__homeTlQ = { post: postTl, flush: tlqFlush, pending: function(card){var q=tlq();return Object.keys(q).some(function(k){return !q[k].c||q[k].c===card;});} };          // для проверок: отправка отметки и сброс резервной очереди
 
   // Share one confirmation poll when a whole season is marked at once.
   var markWaiters=[],markPollTimer=0;

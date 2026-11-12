@@ -46,40 +46,83 @@ public static class LastPlayStore
     {
         var rec = (JObject)n.Resume.DeepClone();
         rec["hash"] = n.H; rec["pos"] = n.T; rec["dur"] = n.D; rec["at"] = n.U;
+        rec["id"] = n.Id; rec["event"] = n.Event; rec["session"] = n.Session; rec["s"] = n.S;
         rec["done"] = n.Op == "completed" || (n.D > 0 && KpUnified.IsDone(n.T, n.D, n.P));
         if (rec["pl"] == null) rec["plKeep"] = true;                      // список серий торрента не пришёл — остаётся прежний
         string src = (string)rec["src"] ?? ""; if (src.Length == 0 || src.Length > 20) return;
         if (!System.Text.RegularExpressions.Regex.IsMatch(n.C ?? "", "^[0-9A-Za-z_.-]{1,60}$")) return;
-        Set(n.C, rec);
+        Set(n.C, rec, accepted: true);
     }
 
     // true — запись применена; false — отвергнута (запоздала относительно сброса просмотра или ручного удаления) либо старше уже сохранённой
-    public static bool Set(string card, JObject rec)
+    static string EventOf(JObject o) => o?["event"]?.Type == JTokenType.String ? (string)o["event"] : null;
+
+    public static JObject GetForRead(string card)
+    {
+        return HomeDb.With(c => {
+            var rec=Get(card);
+            if(rec==null)return null;
+            var row=TlV2.Get(c,(string)rec["hash"]??"");
+            if(row==null || (row.C!=card && TlV2.CardFromIdentity(row.Id)!=card))return rec;
+            if(TlV2.CmpPair(row.U,row.Event,(long?)rec["at"]??0,EventOf(rec))<0)return rec;
+            if(row.Op=="reset")return null;
+            rec["pos"]=row.T;rec["dur"]=row.D;rec["at"]=row.U;
+            rec["event"]=row.Event;rec["id"]=row.Id;rec["s"]=row.S;
+            rec["done"]=row.Op=="completed" || (row.D>0 && KpUnified.IsDone(row.T,row.D,row.P));
+            return rec;
+        });
+    }
+
+    static bool SameTransport(JObject a, JObject b)
+    {
+        if ((string)a["src"] != "url" || (string)b["src"] != "url") return false;
+        string ah = (string)a["infohash"], bh = (string)b["infohash"];
+        if (!string.IsNullOrEmpty(ah) || !string.IsNullOrEmpty(bh))
+            return !string.IsNullOrEmpty(ah) && string.Equals(ah, bh, StringComparison.OrdinalIgnoreCase);
+        string au = (string)a["url"];
+        return !string.IsNullOrEmpty(au) && au == (string)b["url"];
+    }
+
+    public static bool Set(string card, JObject input, bool accepted = false)
     {
         Ensure();
-        // список серий торрента клиент шлёт один раз за серию; дальше присылает plKeep — подставляем сохранённый
-        if ((bool?)rec["plKeep"] == true)
-        {
-            var old = Get(card);
-            if (old != null && (string)old["hash"] == (string)rec["hash"] && old["pl"] != null) { rec["pl"] = old["pl"]; rec["idx"] = old["idx"]; }
-        }
-        rec.Remove("plKeep");
-        // время клиента принимаем, только если часы устройства идут близко к серверным: сбой часов не должен надолго заблокировать более поздние действия с другого устройства
-        long now = HomeDb.Now();
-        long at = (long?)rec["at"] ?? now;
-        if (at > now + 60_000) at = now;                  // только время «из будущего» считаем сбоем часов; запоздавший старый просмотр сохраняет свою дату и не побеждает новый
+        var rec = (JObject)input.DeepClone();
+        if (!accepted) { rec.Remove("event"); rec.Remove("session"); rec.Remove("s"); rec.Remove("id"); }
+        long now = HomeDb.Now(), at = (long?)rec["at"] ?? now;
+        if (!accepted && at > now + 60_000) at = now;
         rec["at"] = at;
-        string hash = (string)rec["hash"];
         return HomeDb.With(c =>
         {
-            // после удаления строки сравнивать не с чем: сверяем с авторитетным сбросом в timeline и с временем ручного удаления
+            var old = Get(card);
+            if (old != null && TlV2.CmpPair(at, EventOf(rec), (long?)old["at"] ?? 0, EventOf(old)) < 0) return false;
+            string hash = (string)rec["hash"];
             var prog = string.IsNullOrEmpty(hash) ? null : TlV2.Get(c, hash);
-            if (prog != null && prog.Op == "reset" && at <= prog.U) return false;
+            if (prog?.Op == "reset" && TlV2.CmpPair(at, EventOf(rec), prog.U, prog.Event) <= 0) return false;
             var gone = HomeDb.Query(c, "SELECT at FROM lastplay_gone WHERE profile_id=@profile AND card=@k", ("@k", card));
             if (gone.Count > 0 && at <= Convert.ToInt64(gone[0][0])) return false;
+            if ((bool?)rec["plKeep"] == true && old != null && (string)old["hash"] == hash && SameTransport(old,rec) && old["pl"] is JArray) {
+                rec["pl"] = old["pl"].DeepClone();
+                rec["idx"] = old["idx"]?.DeepClone();
+            }
+            rec.Remove("plKeep");
             return HomeDb.Exec(c, @"INSERT INTO lastplay(profile_id,card,j,at) VALUES(@profile,@k,@j,@a)
-                         ON CONFLICT(profile_id,card) DO UPDATE SET j=@j, at=@a WHERE excluded.at >= lastplay.at",
+                ON CONFLICT(profile_id,card) DO UPDATE SET j=@j,at=@a",
                 ("@k", card), ("@j", rec.ToString(Formatting.None)), ("@a", at)) > 0;
+        });
+    }
+
+    public static int ResetAccepted(TlV2.Row n)
+    {
+        Ensure();
+        return HomeDb.With(c => {
+            var rows = HomeDb.Query(c,"SELECT card,j FROM lastplay WHERE profile_id=@profile AND json_extract(j,'$.hash')=@h",("@h",n.H));
+            int deleted = 0;
+            foreach(var row in rows) {
+                var old = JObject.Parse((string)row[1]);
+                if(TlV2.CmpPair(n.U,n.Event,(long?)old["at"]??0,EventOf(old))>=0)
+                    deleted += HomeDb.Exec(c,"DELETE FROM lastplay WHERE profile_id=@profile AND card=@k",("@k",row[0]));
+            }
+            return deleted;
         });
     }
 
@@ -139,7 +182,7 @@ public class LastPlayController : BaseController
         IDisposable sb;
         try { sb = HomeDb.Enter(sbx); } catch { return Json(new { error = "no sandbox" }, 404); }
         using var _sb = sb;
-        var rec = LastPlayStore.Get(card);
+        var rec = LastPlayStore.GetForRead(card);
         if (rec != null && card.EndsWith("_tv", StringComparison.Ordinal) && !ReleasePolicy.AllowSubtitlesOnly)
         {
             int s = (int?)rec["season"] ?? 0;

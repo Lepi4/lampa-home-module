@@ -496,7 +496,7 @@ public class KinoPubCardsController : BaseController
     {
         if (Profiles.Current?.Child == true && ProfileCatalogPages.Supports(mode))
         {
-            string poolKey = $"{Profiles.CurrentId}|{Profiles.Current.PolicyRev}|{mode}|{Prof()}|{Request.Query["dev"]}|{Request.Query["months"]}";
+            string poolKey = $"{HomeDb.SandboxId}|{Profiles.CurrentId}|{Profiles.Current.PolicyRev}|{mode}|{Prof()}|{Request.Query["dev"]}|{Request.Query["months"]}";
             var filled = await ProfileCatalogPages.Get(poolKey, page, async sourcePage =>
             {
                 var raw = await CardsCore(mode, sourcePage, true) as ContentResult;
@@ -524,7 +524,7 @@ public class KinoPubCardsController : BaseController
     {
         bool personal = mode is "continue" or "watching" or "watching_anime" or "my_movies" or "my_cartoons" or "my_anime_movies" or "watching_cartoons";
         var ttl = personal ? TimeSpan.FromSeconds(90) : TimeSpan.FromMinutes(10);
-        string key = $"strip|{Profiles.CurrentId}|{Profiles.Current?.PolicyRev}|{mode}|{Prof()}|{Request.Query["dev"].FirstOrDefault()}|{Request.Query["months"].FirstOrDefault()}|{want}";
+        string key = $"strip|{HomeDb.SandboxId}|{Profiles.CurrentId}|{Profiles.Current?.PolicyRev}|{mode}|{Prof()}|{Request.Query["dev"].FirstOrDefault()}|{Request.Query["months"].FirstOrDefault()}|{want}";
         bool fresh = Request.Query["fresh"].FirstOrDefault() == "1";
         stripCache.TryGetValue(key, out var hit);
         if (!personal && !fresh && hit.cards != null && DateTime.UtcNow - hit.at < ttl)

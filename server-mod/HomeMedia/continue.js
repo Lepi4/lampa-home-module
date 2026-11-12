@@ -49,6 +49,37 @@
     $.ajax({ url: BASE + '/home/lastplay/get?card=' + encodeURIComponent(card) + kpq(), dataType: 'json', cache: false, timeout: 15000, success: function (d) { cb(d && d.src ? d : null); }, error: function () { cb(null); } });
   }
 
+  // Persist the original add link in the owner's local scope, before playback.
+  (function(){
+    function key(){var o=window.HomeUser&&HomeUser.owner;return 'home_torrent_refs_v2_'+encodeURIComponent(BASE)+'_'+(o&&o.profile?o.profile.id:'u_default');}
+    function load(k){try{return JSON.parse(localStorage.getItem(k)||'{}');}catch(e){return {};}}
+    window.__home_torrent_ref=function(hash){
+      var row=load(key())[hash];return row&&Date.now()-row.at<30*86400000?row:null;
+    };
+    function hook(){
+      if(!window.Lampa||!Lampa.Torserver||typeof Lampa.Torserver.hash!=='function')return false;
+      if(Lampa.Torserver.hash.__homeRef)return true;
+      var original=Lampa.Torserver.hash;
+      var wrapped=function(request,success,failure){
+        var scope=key(),link=String(request&&request.link||'');
+        return original.call(this,request,function(result){
+          var hash=String(result&&result.hash||'').toLowerCase();
+          if(scope===key()&&/^[a-f0-9]{40}$/.test(hash)&&/^(magnet:\?|https?:\/\/)/i.test(link)&&link.length<=2000){
+            try{
+              var all=load(scope);all[hash]={link:link,at:Date.now()};
+              var keys=Object.keys(all).sort(function(a,b){return all[b].at-all[a].at;});
+              keys.slice(100).forEach(function(k){delete all[k];});
+              localStorage.setItem(scope,JSON.stringify(all));
+            }catch(e){}
+          }
+          if(typeof success==='function')return success.apply(this,arguments);
+        },failure);
+      };
+      wrapped.__homeRef=true;Lampa.Torserver.hash=wrapped;return true;
+    }
+    if(!hook()){var n=0,t=setInterval(function(){if(hook()||++n>60)clearInterval(t);},500);}
+  })();
+
   // ---------- запись ----------
   function titleKey(data) {
     try {
@@ -108,6 +139,7 @@
         var hm = String(it.url || '').match(/[?&]link=([a-fA-F0-9]{40})/);
         if (hm) infohash = hm[1].toLowerCase();
         if (!infohash && magnet) { var bm = String(magnet).match(/btih:([a-fA-F0-9]{40})/i); if (bm) infohash = bm[1].toLowerCase(); }
+        if(!magnet && infohash){var saved=window.__home_torrent_ref(infohash);if(saved)magnet=saved.link;}
         if (magnet || infohash) hs = $.extend({}, hs, { magnet: String(magnet).slice(0, 2000), infohash: infohash });
       }
       MAP[String(h)] = { hs: hs, card: key, title: String(it.title || '').slice(0, 200), pi: i, many: items.length > 1 };
@@ -491,6 +523,10 @@
         hash = found ? found[1].toLowerCase() : '';
       }
       function playNow() {
+        playlist.forEach(function(p,i){resumeList[i].u=p.url;metas[i].r.url=p.url;});
+        native=$.extend({},playlist[start]);native.playlist=playlist;
+        native.tl_meta=JSON.stringify(metas);native.resume_playlist=JSON.stringify(resumeList);
+        if(rec.magnet)native.magnet=rec.magnet;
         window.__apKey = movie.id + '_' + media; window.__apKeyAt = Date.now();
         Lampa.Player.play(native);
         Lampa.Player.playlist(playlist);
@@ -504,7 +540,23 @@
           $.ajax({
             url: base + '/torrents', type: 'POST', contentType: 'application/json', dataType: 'json', timeout: 8000,
             data: JSON.stringify({ action: 'get', hash: hash }),
-            success: function (d) { done(!!(d && d.file_stats && d.file_stats.length)); },
+            success: function (d) {
+              if(!d||!d.file_stats||!d.file_stats.length)return done(false);
+              try {
+                playlist.forEach(function(p){
+                  var old=new URL(p.url,location.href),link=old.searchParams.get('link');
+                  if(String(link||'').toLowerCase()!==hash)throw Error('different_torrent');
+                  var index=old.searchParams.get('index');
+                  if(index===null||!/^\d+$/.test(index))throw Error('missing_file');
+                  var file=d.file_stats.filter(function(f){return String(f.id)===String(index);})[0];
+                  if(!file)throw Error('missing_file');
+                  var fresh=new URL(base+'/stream');
+                  fresh.searchParams.set('link',hash);fresh.searchParams.set('index',String(file.id));fresh.searchParams.set('play','');
+                  p.url=fresh.toString();
+                });
+                done(true);
+              } catch(e){done(false);}
+            },
             error: function () { done(false); }
           });
         }

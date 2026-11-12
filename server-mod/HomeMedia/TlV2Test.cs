@@ -82,7 +82,7 @@ public class TlV2TestController : BaseController
                 long uLate = HomeDb.Now() + 90_000;
                 long uEarly = HomeDb.Now();
                 int cmp = TlV2.CmpPair(uLate, "100:1", uEarly, "100:2");
-                T("CmpPair: same session prefers event seq over wall-clock u", cmp < 0, $"cmp={cmp}");
+                T("CmpPair: total order compares logical u before event for every actor", cmp > 0, $"cmp={cmp}");
             }
 
             // 3. любой порядок доставки приводит к одному итогу
