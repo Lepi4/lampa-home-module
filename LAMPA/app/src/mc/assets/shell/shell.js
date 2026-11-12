@@ -432,16 +432,19 @@
       }],['Назад',null,menuClose]]);return;
     }
     if (rowId === 'vk') {
-      menuShow(title, [
-        ['Открыть', null, function () { menuClose(); e._act(); }],
-        ['Просмотрено', null, function () {
+      var entries = [['Открыть', null, function () { menuClose(); e._act(); }]];
+      if (it.channel_id && !it.vk_album) entries.push(['Канал', it.channel || '', function () {
+        menuClose();
+        lampaGo(JSON.stringify({ js: '(function(a,b){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__vk&&window.__vk.openChannel){clearInterval(t);window.__vk.openChannel(a,b)}else if(++n<=80)t=setTimeout(run,100)}run()})', arg: JSON.stringify(it.channel_id) + ',' + JSON.stringify(it.channel || '') }));
+      }]);
+      if (it.id && !it.vk_album && !it.media_type) entries.push(['Просмотрено', null, function () {
           writeApi('/vk/seen?id=' + encodeURIComponent(it.id) + '&on=1', {}, function (d) {
             if (d.error) { toast('Не удалось сохранить отметку'); return; }
             menuClose(); dropCard(e, rowId); toast('Просмотрено');
           });
-        }],
-        ['Закрыть', null, menuClose]
-      ]);
+        }]);
+      entries.push(['Закрыть', null, menuClose]);
+      menuShow(title, entries);
       return;
     }
     if (rowId === 'youtube') {
@@ -1415,7 +1418,7 @@
 
   // ---------- поиск: своя страница, Lampa не открывается; открывается только карточка выбранного ----------
   var lastQuery = '';
-  var SEARCH_CATEGORIES = [['movie', 'Фильмы'], ['cartoon_movie', 'Мультфильмы'], ['person', 'Люди'], ['tv', 'Сериалы'], ['cartoon_tv', 'Мультсериалы'], ['anime_movie', 'Аниме'], ['anime_tv', 'Аниме-сериалы'], ['yc', 'YouTube каналы'], ['yv', 'YouTube видео'], ['vv', 'VK видео'], ['vp', 'VK плейлисты']];
+  var SEARCH_CATEGORIES = [['movie', 'Фильмы'], ['cartoon_movie', 'Мультфильмы'], ['person', 'Люди'], ['tv', 'Сериалы'], ['cartoon_tv', 'Мультсериалы'], ['anime_movie', 'Аниме'], ['anime_tv', 'Аниме-сериалы'], ['yc', 'YouTube каналы'], ['yv', 'YouTube видео'], ['vc', 'VK каналы'], ['vv', 'VK видео'], ['vp', 'VK плейлисты']];
   var PERIODS = [['', 'любой'], ['y1', 'этот год'], ['y3', 'последние 3 года'], ['y10', 'последние 10 лет'], ['d2020', '2020-е'], ['d2010', '2010-е'], ['d2000', '2000-е'], ['old', 'до 2000']];
   var COUNTRIES = [['all', 'все (без Индии и Турции)'], ['foreign', 'зарубежные'], ['ru', 'отечественные'], ['any', 'все, без исключений']];
   var RATINGS = [[0, 'любой'], [5, 'от 5'], [6, 'от 6'], [7, 'от 7'], [8, 'от 8']];
@@ -1425,7 +1428,7 @@
   function searchWithAlternative(path, q, category, request, ok, fail) {
     request(path, function (d) {
       var alternate = searchAlternative(q);
-      if (category !== 'yc' && category !== 'yv' && category !== 'vv' && category !== 'vp' && alternate !== q && d && Array.isArray(d.results) && !d.results.length && !d.next_page && !d.error) {
+      if (category !== 'yc' && category !== 'yv' && category !== 'vc' && category !== 'vv' && category !== 'vp' && alternate !== q && d && Array.isArray(d.results) && !d.results.length && !d.next_page && !d.error) {
         var next = path.replace(/([?&])q=[^&]*/, function (_, sep) { return sep + 'q=' + encodeURIComponent(alternate); });
         return request(next, function (result) { ok(result, next); }, fail);
       }
@@ -1439,7 +1442,7 @@
     var vk=!child&&!(state.sources&&state.sources.vk===false);
     return SEARCH_CATEGORIES.filter(function(c){
       if(c[0]==='yc'||c[0]==='yv')return yt;
-      if(c[0]==='vv'||c[0]==='vp')return vk;
+      if(c[0]==='vc'||c[0]==='vv'||c[0]==='vp')return vk;
       return true;
     });
   }
@@ -1477,6 +1480,19 @@
     return t;
   }
 
+  function vkChannelTile(ch) {
+    var t = el('div', 'tile chan gc');
+    var im = document.createElement('img'); if (ch.thumb) im.src = state.server + '/vk/p?u=' + b64url(ch.thumb); t.appendChild(im);
+    var box = el('div', 'cbox'); box.appendChild(el('div', 'cn', ch.title || ch.id));
+    var sub = nfs(ch.followers); box.appendChild(el('small', null, sub ? sub + ' подписчиков' : 'канал VK')); t.appendChild(box);
+    t._item = { title: ch.title, overview: ch.description || '', channel: ch.title, channel_id: ch.id, media_type: 'channel', vote_average: 0 };
+    t._act = function () {
+      setupShow(false); state.searchOpen = false; $('setup').className = 'hidden';
+      lampaGo(JSON.stringify({ js: '(function(a,b){window.__mc_ret=1;var n=0;var generation=window.__mc_nav_id;var t=null;function run(){if(generation!==window.__mc_nav_id)return;if(window.__vk&&window.__vk.openChannel){clearInterval(t);window.__vk.openChannel(a,b)}else if(++n<=80)t=setTimeout(run,100)}run()})', arg: JSON.stringify(ch.id) + ',' + JSON.stringify(ch.title || '') }));
+    };
+    return t;
+  }
+
   function openSearch(q0) {
     var box = $('setup'); box.innerHTML = '';
     box.className = 'searchbox hidden';
@@ -1507,7 +1523,7 @@
     var fCou = tile('Страна: ' + lab(COUNTRIES, sf.c), null, function () { var f = sfGet(); f.c = cyc(COUNTRIES, f.c); save('mc_sf', f); fCou.firstChild.textContent = 'Страна: ' + lab(COUNTRIES, f.c); last = ''; run(inp.value); });
     var fRat = tile('Рейтинг: ' + lab(RATINGS, sf.r), null, function () { var f = sfGet(); f.r = cyc(RATINGS, f.r); save('mc_sf', f); fRat.firstChild.textContent = 'Рейтинг: ' + lab(RATINGS, f.r); last = ''; run(inp.value); });
     fline.appendChild(fPer); fline.appendChild(fCou); fline.appendChild(fRat);
-    function filtersApply() { var c = searchMode(); return c !== 'person' && c !== 'yc' && c !== 'yv' && c !== 'vv' && c !== 'vp'; }
+    function filtersApply() { var c = searchMode(); return c !== 'person' && c !== 'yc' && c !== 'yv' && c !== 'vc' && c !== 'vv' && c !== 'vp'; }
     function applyCategoryUi() { fline.style.display = filtersApply() ? '' : 'none'; }
 
     var info = el('p', 'sinfo', 'Введите запрос или нажмите «Голос»'); box.appendChild(info);
@@ -1544,6 +1560,7 @@
         var c;
         if (cat === 'person') c = personCard(it);
         else if (cat === 'yc') { c = channelTile(it); }
+        else if (cat === 'vc') { c = vkChannelTile(it); }
         else if (cat === 'yv') { c = cardEl(cardOfYt(it), { id: 'youtube', style: 'wide' }); c._item = cardOfYt(it); }
         else if (cat === 'vv') { c = cardEl(cardOfVk(it), { id: 'vk', style: 'wide' }); c._item = cardOfVk(it); }
         else if (cat === 'vp') { c = cardEl(cardOfVkAlbum(it), { id: 'vk', style: 'wide' }); c._item = cardOfVkAlbum(it); }
@@ -1560,6 +1577,7 @@
       info.textContent = name + ': ищу «' + q + '»…';
       var path;
       if (cat === 'yc') path = '/yt/channels?n=18&q=' + encodeURIComponent(q);
+      else if (cat === 'vc') path = '/vk/search?kind=channel&q=' + encodeURIComponent(q);
       else if (cat === 'yv') path = '/yt/search?n=30&q=' + encodeURIComponent(q);
       else if (cat === 'vv') path = '/vk/search?kind=video&q=' + encodeURIComponent(q);
       else if (cat === 'vp') path = '/vk/search?kind=album&q=' + encodeURIComponent(q);
@@ -1605,7 +1623,7 @@
     if (inp.value) { last = ''; run(inp.value); }
   }
   function cardOfYt(v) { return { id: v.id, title: v.title, thumb: v.thumb, duration: v.duration, channel: v.channel, channel_id: v.channel_id, published: v.published, views: v.views }; }
-  function cardOfVk(v) { return { id: v.id, title: v.title, thumb: v.thumb, duration: v.duration, provider: 'vk' }; }
+  function cardOfVk(v) { return { id: v.id, title: v.title, thumb: v.thumb, duration: v.duration, provider: 'vk', channel: v.channel || '', channel_id: v.channel_id || '' }; }
   function cardOfVkAlbum(a) { return { id: a.id, title: a.title || a.id, thumb: a.thumb, provider: 'vk', vk_album: a.id }; }
 
   // страница человека: его фильмография

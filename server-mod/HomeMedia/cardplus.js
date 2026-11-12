@@ -48,7 +48,9 @@
     '.card .cp-bar{left:0;right:0;bottom:0;height:.3em;background:rgba(0,0,0,.55)}' +
     '.card .cp-bar i{display:block;height:100%;background:#f9a825}' +
     // рейтинги IMDb / Кинопоиск на странице карточки
-    '.full-start__rate.cp-rate{margin-right:.8em}';
+    '.full-start__rate.cp-rate{margin-right:.8em}' +
+    // на карточке фильма уже есть штатные часы в шапке
+    'body.cp-card #cp-clock{display:none !important}';
   var st = document.createElement('style');
   st.id = 'cardplus-css';
   st.textContent = css;
@@ -335,6 +337,13 @@
     var t = Math.round(Number(d.temp));
     return weatherMark(d.condition) + ' ' + ((t > 0 ? '+' : '') + t + '\u00B0');
   }
+  function onCard() {
+    if (document.body.classList.contains('cp-card')) return true;
+    try {
+      var act = window.Lampa && Lampa.Activity && Lampa.Activity.active();
+      return !!(act && act.component === 'full');
+    } catch (e) { return false; }
+  }
   function paintWeather() {
     var text = weatherText(weatherCache);
     var node = document.getElementById('cp-clock');
@@ -344,6 +353,8 @@
       node.style.cssText = 'position:fixed;top:4px;right:18px;z-index:40;color:#fff;font-size:28px;font-weight:500;background:transparent;text-shadow:0 2px 6px #000;pointer-events:none';
       document.body.appendChild(node);
     }
+    node.style.display = onCard() ? 'none' : '';
+    if (node.style.display === 'none') return;
     var d = new Date();
     var time = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
     node.textContent = text ? time + '  ' + text : time;
@@ -365,6 +376,10 @@
   }
   function hookWeather() {
     if (!window.__cpClock) window.__cpClock = setInterval(paintWeather, 10000);
+    if (!window.__cpClockPlace) window.__cpClockPlace = setInterval(function () {
+      var node = document.getElementById('cp-clock');
+      if (node) node.style.display = onCard() ? 'none' : '';
+    }, 400);
     paintWeather();
     Lampa.Listener.follow('full', function (e) {
       if (e.type !== 'complite') return;

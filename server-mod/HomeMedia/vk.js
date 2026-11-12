@@ -17,6 +17,12 @@
     try { var n = Lampa.Controller.enabled().name; return n && n !== 'select' && n !== 'modal' ? n : 'content'; }
     catch (e) { return 'content'; }
   }
+  function nf(n) {
+    n = parseInt(n, 10) || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + ' млн';
+    if (n >= 1e3) return Math.round(n / 1e3) + ' тыс.';
+    return n ? String(n) : '';
+  }
   function fmt(sec) {
     sec = Math.max(0, Math.floor(sec || 0));
     var m = Math.floor(sec / 60), s = sec % 60;
@@ -65,7 +71,13 @@
   }
   function openAlbum(id, title) { openCards(title || 'Плейлист VK', { mode: 'album', id: id }); }
   function openAlbums() { openCards('VK Видео', { mode: 'albums' }); }
+  function openChannel(id, title) { openCards(title || 'Канал VK', { mode: 'channel', id: id }); }
+  function openChannels() { openCards('Каналы VK', { mode: 'channels' }); }
   function feed() { openCards('Мой VK', { mode: 'feed' }); }
+  function followChannel(id, on, ok) {
+    if (on) $.ajax({ url: BASE + '/vk/channels/remove?id=' + encodeURIComponent(id), method: 'POST', timeout: 20000, success: ok, error: function () { noty('Не удалось отписаться'); } });
+    else $.ajax({ url: BASE + '/vk/channels/add', method: 'POST', contentType: 'application/json', data: JSON.stringify({ id: id }), timeout: 20000, success: ok, error: function () { noty('Не удалось подписаться'); } });
+  }
 
   function savePack(name) {
     try { HomeUser.owner.profile.settings.vk_profile = name; } catch (e) {}
@@ -96,12 +108,16 @@
     }, function () { noty('Наборы не открылись'); });
   }
 
+  function followAlbum(id, on, title, ok) {
+    if (on) $.ajax({ url: BASE + '/vk/subs/remove?id=' + encodeURIComponent(id), method: 'POST', timeout: 20000, success: ok, error: function () { noty('Не удалось отписаться'); } });
+    else $.ajax({ url: BASE + '/vk/subs/add', method: 'POST', contentType: 'application/json', dataType: 'json', data: JSON.stringify({ id: id, title: title || '' }), timeout: 20000, success: ok, error: function () { noty('Не удалось подписаться'); } });
+  }
   function addByLink() {
-    Lampa.Input.edit({ title: 'Ссылка на плейлист', value: '', nosave: true, onBack: function () { Lampa.Controller.toggle(ctrl()); } }, function (v) {
+    Lampa.Input.edit({ title: 'Ссылка на плейлист или канал', value: '', nosave: true, onBack: function () { Lampa.Controller.toggle(ctrl()); } }, function (v) {
       if (!v) return;
-      $.ajax({ url: BASE + '/vk/subs/add', method: 'POST', contentType: 'application/json', data: JSON.stringify({ url: v }), timeout: 20000,
-        success: function () { noty('Плейлист добавлен'); openAlbums(); },
-        error: function () { noty('Плейлист не добавлен'); }
+      $.ajax({ url: BASE + '/vk/subs/add', method: 'POST', contentType: 'application/json', dataType: 'json', data: JSON.stringify({ url: v }), timeout: 20000,
+        success: function (d) { noty(d && d.kind === 'channel' ? 'Канал добавлен' : 'Плейлист добавлен'); openAlbums(); },
+        error: function () { noty('Не добавлено'); }
       });
     });
   }
@@ -110,9 +126,18 @@
     Lampa.Input.edit({ title: 'Поиск VK', value: '', nosave: true, onBack: function () { Lampa.Controller.toggle(ctrl()); } }, function (q) {
       if (!q) return;
       api('/vk/search?q=' + encodeURIComponent(q), function (d) {
-        var items = (d.videos || []).map(function (v) { return { title: v.title, subtitle: fmt(v.duration), v: v }; });
-        (d.albums || []).forEach(function (a) { items.push({ title: 'Плейлист: ' + (a.title || a.id), subtitle: 'подписать', album: a }); });
+        var items = [];
+        (d.channels || []).forEach(function (c) {
+          var bits = [];
+          var followers = nf(c.followers);
+          if (followers) bits.push(followers + ' подписчиков');
+          if (c.description) bits.push(c.description);
+          items.push({ title: c.title || c.id, subtitle: bits.join(' · '), channel: c });
+        });
+        (d.videos || []).forEach(function (v) { items.push({ title: v.title, subtitle: fmt(v.duration), v: v }); });
+        (d.albums || []).forEach(function (a) { items.push({ title: 'Плейлист: ' + (a.title || a.id), subtitle: 'открыть', album: a }); });
         show('VK · ' + q, items, function (a) {
+          if (a.channel) { openChannel(a.channel.id, a.channel.title); return; }
           if (a.album) { openAlbum(a.album.id, a.album.title); return; }
           play(a.v.id, a.v.title);
         });
@@ -126,7 +151,10 @@
     catch (e) { return ''; }
   }
   function cardOf(v) {
-    return { id: 'vk' + String(v.id).replace('-', 'm'), vk_id: v.id, seen: !!v.seen, title: v.title || 'VK', name: v.title || 'VK', overview: v.album_title || '', img: poster(v.thumb), quality: v.duration ? fmt(v.duration) : '', source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0, params: { style: { name: 'wide' } } };
+    return { id: 'vk' + String(v.id).replace('-', 'm'), vk_id: v.id, vk_channel: v.channel_id || '', vk_channel_name: v.channel || '', seen: !!v.seen, title: v.title || 'VK', name: v.title || 'VK', overview: v.album_title || '', img: poster(v.thumb), quality: v.duration ? fmt(v.duration) : '', source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0, params: { style: { name: 'wide' } } };
+  }
+  function channelCard(c) {
+    return { id: 'vkc' + String(c.id).replace('-', 'm'), vk_channel: c.id, title: c.title || c.id, name: c.title || 'Канал', overview: c.description || '', img: poster(c.thumb), source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0, params: { style: { name: 'wide' } } };
   }
   function albumCard(a) {
     return { id: 'vka' + String(a.id).replace('-', 'm'), vk_album: a.id, title: a.title || a.id, name: a.title || 'Плейлист', overview: '', img: poster(a.thumb), source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0, params: { style: { name: 'wide' } } };
@@ -134,18 +162,27 @@
 
   function vkComponent(object) {
     var comp = new Lampa.InteractionCategory(object);
+    var info = null;
     comp.create = function () {
       var self = this, vk = object.vk || {};
       this.activity.loader(true);
-      var path = vk.mode === 'album' ? '/vk/album?id=' + encodeURIComponent(vk.id) : vk.mode === 'feed' ? '/vk/feed' : '/vk/subs';
+      var path = vk.mode === 'album' ? '/vk/album?id=' + encodeURIComponent(vk.id)
+        : vk.mode === 'channel' ? '/vk/channel?id=' + encodeURIComponent(vk.id)
+        : vk.mode === 'channels' ? '/vk/channels'
+        : vk.mode === 'feed' ? '/vk/feed' : '/vk/subs';
       api(path, function (d) {
-        var results = vk.mode === 'albums'
-          ? (d.albums || []).map(albumCard)
-          : (d.results || []).map(cardOf);
-        if (vk.mode === 'albums') results.push({ id: 'vkadd', vk_add: true, title: 'Добавить плейлист', name: 'Добавить плейлист', overview: 'по ссылке', source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0, params: { style: { name: 'wide' } } });
+        var results;
+        if (vk.mode === 'albums') results = (d.albums || []).map(albumCard);
+        else if (vk.mode === 'channels') results = (d.channels || []).map(channelCard);
+        else results = (d.results || []).map(cardOf);
+        if (vk.mode === 'channel' || vk.mode === 'album') {
+          info = d.info || { id: vk.id, title: object.title || '', subscribed: false, kind: vk.mode === 'album' ? 'album' : 'channel' };
+          results.unshift({ id: 'vkhead', vk_head: true, title: info.title || object.title || '', name: info.title || '', overview: info.description || '', img: poster(info.thumb), source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0 });
+        }
+        if (vk.mode === 'albums') results.push({ id: 'vkadd', vk_add: true, title: 'Добавить', name: 'Добавить', overview: 'плейлист или канал', source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0, params: { style: { name: 'wide' } } });
         if (!results.length) { self.empty(); return; }
         self.build({ results: results, page: 1, total_pages: 1, total_results: results.length });
-        try { self.render().addClass('yt-wide'); } catch (e) {}
+        try { self.render().addClass(vk.mode === 'channels' ? 'vk-channels' : 'yt-wide'); } catch (e) {}
       }, function () { self.empty(); noty('VK: не загрузилось'); });
     };
     comp.nextPageReuest = function (obj, resolve, reject) { reject(); };
@@ -165,7 +202,37 @@
       mark.textContent = '\u2713';
       view.appendChild(mark);
     }
+    function fillHeader(card) {
+      var i = info || {};
+      var el = $(card.render());
+      el.addClass('vk-headcard');
+      var h = $('<div class="vk-chead"></div>');
+      if (i.thumb) h.append($('<img class="vk-chead__ava">').attr('src', poster(i.thumb)));
+      var box = $('<div class="vk-chead__box"></div>');
+      box.append($('<div class="vk-chead__name"></div>').text(i.title || object.title || ''));
+      var followers = nf(i.followers);
+      if (i.kind === 'album' && i.count) box.append($('<div class="vk-chead__meta"></div>').text(i.count + ' видео'));
+      else if (followers) box.append($('<div class="vk-chead__meta"></div>').text(followers + ' подписчиков'));
+      if (i.description) box.append($('<div class="vk-chead__descr"></div>').text(i.description));
+      var btn = $('<div class="vk-chead__btn"></div>').text(i.subscribed ? 'Отписаться' : 'Подписаться').data('on', !!i.subscribed);
+      box.append(btn);
+      h.append(box);
+      el.children().hide();
+      el.append(h);
+      card.onEnter = function () {
+        var on = !!btn.data('on');
+        var done = function () {
+          btn.data('on', !on);
+          btn.text(on ? 'Подписаться' : 'Отписаться');
+          noty(on ? 'Отписка' : 'Подписка: ' + (i.title || ''));
+        };
+        if (i.kind === 'album') followAlbum(i.id, on, i.title, done);
+        else followChannel(i.id, on, done);
+      };
+      card.onMenu = function () {};
+    }
     comp.cardRender = function (obj, element, card) {
+      if (element.vk_head) return fillHeader(card);
       paintSeen(card, element);
       var keepFocus = card.onFocus;
       card.onFocus = function () { paintSeen(card, element); if (typeof keepFocus === 'function') keepFocus.apply(card, arguments); };
@@ -173,13 +240,23 @@
         if (element.vk_add) return addByLink();
         if (element.vk_id) return play(element.vk_id, element.title);
         if (element.vk_album) openAlbum(element.vk_album, element.title);
+        if (element.vk_channel && !element.vk_id) openChannel(element.vk_channel, element.title);
       };
       card.onMenu = function () {
-        if (!element.vk_id) return;
+        if (!element.vk_id && !element.vk_channel) return;
         var back = ctrl();
-        show(element.title || 'Ролик', [
-          { title: element.seen ? 'Снять отметку' : 'Просмотрено', mark: true }
-        ], function () {
+        function openMenu(subscribed) {
+          var items = [];
+          if (element.vk_channel) items.push({ title: subscribed ? 'Отписаться' : 'Подписаться', sub: true, on: subscribed });
+          if (element.vk_channel && element.vk_id) items.push({ title: 'Открыть канал', open: true });
+          if (element.vk_id) items.push({ title: element.seen ? 'Снять отметку' : 'Просмотрено', mark: true });
+          show(element.title || 'VK', items, function (a) {
+            if (a.open) { openChannel(element.vk_channel, element.vk_channel_name || element.title); return; }
+            if (a.sub) {
+              followChannel(element.vk_channel, a.on, function () { noty(a.on ? 'Отписка' : 'Подписка: ' + (element.vk_channel_name || '')); Lampa.Controller.toggle(back); });
+              return;
+            }
+            if (!a.mark) return;
           var next = !element.seen;
           $.ajax({ url: BASE + '/vk/seen?id=' + encodeURIComponent(element.vk_id) + '&on=' + (next ? 1 : 0), method: 'POST', timeout: 15000,
             success: function () {
@@ -190,8 +267,14 @@
             },
             error: function () { noty('Не удалось сохранить отметку'); }
           });
-          Lampa.Controller.toggle(back);
-        });
+            Lampa.Controller.toggle(back);
+          });
+        }
+        if (!element.vk_channel) return openMenu(false);
+        api('/vk/channels', function (d) {
+          var on = (d.channels || []).some(function (c) { return c.id === element.vk_channel; });
+          openMenu(on);
+        }, function () { openMenu(false); });
       };
     };
     return comp;
@@ -229,6 +312,7 @@
       show('VK Видео', [
         { title: 'Мой VK', go: feed },
         { title: 'Поиск', go: search },
+        { title: 'Каналы', go: openChannels },
         { title: 'Плейлисты', go: openAlbums },
         { title: 'Набор плейлистов', go: packs }
       ], function (a) { a.go(); });
@@ -240,9 +324,19 @@
     try { Lampa.Component.add('vk_list', vkComponent); } catch (e) {}
     addRow(); addMenu(); setTimeout(addMenu, 2000);
   }
-  window.__vk = { play: play, feed: feed, search: search, openAlbum: openAlbum, open: function () { openAlbums(); } };
+  window.__vk = { play: play, feed: feed, search: search, openAlbum: openAlbum, openChannel: openChannel, channels: openChannels, open: function () { openAlbums(); } };
   var seenStyle = document.createElement('style');
-  seenStyle.textContent = '.vk-seen{position:absolute;top:.4em;left:.4em;background:#2ecc71;color:#fff;font-weight:700;border-radius:.3em;padding:.15em .4em;z-index:2}';
+  seenStyle.textContent = '.vk-seen{position:absolute;top:.4em;left:.4em;background:#2ecc71;color:#fff;font-weight:700;border-radius:.3em;padding:.15em .4em;z-index:2}' +
+    '.vk-headcard{width:100% !important;margin-bottom:.6em}' +
+    '.vk-chead{display:flex;gap:1.4em;align-items:flex-start;padding:.5em 1em;border-radius:.6em}' +
+    '.vk-chead__ava{width:7em;height:7em;border-radius:50%;object-fit:cover;background:#222;flex:none}' +
+    '.vk-chead__box{flex:1;min-width:0}' +
+    '.vk-chead__name{font-size:1.7em;font-weight:700}' +
+    '.vk-chead__meta{opacity:.7;margin-top:.2em}' +
+    '.vk-chead__descr{margin-top:.5em;opacity:.85;line-height:1.4;max-height:6em;overflow:hidden;white-space:pre-line}' +
+    '.vk-chead__btn{display:inline-block;margin-top:.7em;padding:.45em 1.1em;border-radius:.4em;background:rgba(255,255,255,.14)}' +
+    '.vk-headcard.focus .vk-chead__btn{background:#fff;color:#000}' +
+    '.vk-headcard.focus .vk-chead{background:rgba(0,0,0,.45)}';
   document.head.appendChild(seenStyle);
   if (window.appready) start();
   else Lampa.Listener.follow('app', function (e) { if (e.type === 'ready') start(); });

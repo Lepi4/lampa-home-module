@@ -698,16 +698,16 @@
             });
           } }));
         var list = el('div', { style: 'display:flex;flex-wrap:wrap;gap:.35em;margin:.3em 0' });
-        var input = el('input', { type: 'text', placeholder: 'Ссылка vkvideo.ru или -123_45', maxlength: '300', style: 'width:100%;box-sizing:border-box' });
-        var add = el('button', { class: 'primary', text: 'Добавить плейлист', onclick: function () {
+        var input = el('input', { type: 'text', placeholder: 'Ссылка на плейлист или канал', maxlength: '300', style: 'width:100%;box-sizing:border-box' });
+        var add = el('button', { class: 'primary', text: 'Добавить', onclick: function () {
           var raw = input.value.trim();
           if (!raw) return;
           add.disabled = true;
           api('/vk/subs/add?profile=' + encodeURIComponent(p.name), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: raw }) }).then(function (s) {
             add.disabled = false;
-            if (!s.ok) { toast('Плейлист не добавлен'); return; }
-            input.value = ''; toast('Плейлист сохранён'); load();
-          }).catch(function () { add.disabled = false; toast('Плейлист не добавлен'); });
+            if (!s.ok) { toast('Не добавлено'); return; }
+            input.value = ''; toast(s.json && s.json.kind === 'channel' ? 'Канал сохранён' : 'Плейлист сохранён'); load();
+          }).catch(function () { add.disabled = false; toast('Не добавлено'); });
         } });
         api('/vk/subs?profile=' + encodeURIComponent(p.name)).then(function (s) {
           var albums = (s.json && s.json.albums) || [];
@@ -715,6 +715,14 @@
           albums.forEach(function (a) {
             list.appendChild(el('span', { class: 'badge', style: 'cursor:pointer', title: 'Убрать плейлист', text: (a.title || a.id) + ' ✕', onclick: function () {
               api('/vk/subs/remove?profile=' + encodeURIComponent(p.name) + '&id=' + encodeURIComponent(a.id), { method: 'POST' }).then(function () { load(); });
+            } }));
+          });
+        });
+        api('/vk/channels?profile=' + encodeURIComponent(p.name)).then(function (s) {
+          var channels = (s.json && s.json.channels) || [];
+          channels.forEach(function (c) {
+            list.appendChild(el('span', { class: 'badge', style: 'cursor:pointer', title: 'Отписать канал', text: (c.title || c.id) + ' ✕', onclick: function () {
+              api('/vk/channels/remove?profile=' + encodeURIComponent(p.name) + '&id=' + encodeURIComponent(c.id), { method: 'POST' }).then(function () { load(); });
             } }));
           });
         });

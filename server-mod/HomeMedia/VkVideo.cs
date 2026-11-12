@@ -117,7 +117,17 @@ public static class VkStore
             HomeDb.Exec(c, @"CREATE TABLE IF NOT EXISTS vk_seen (
             profile TEXT, video TEXT, at INTEGER, PRIMARY KEY(profile, video))");
             HomeDb.Exec(c, "CREATE TABLE IF NOT EXISTS vk_profiles (name TEXT PRIMARY KEY, at INTEGER)");
+            HomeDb.Exec(c, @"CREATE TABLE IF NOT EXISTS vk_channels (
+            profile TEXT, owner TEXT, title TEXT, thumb TEXT, at INTEGER, PRIMARY KEY(profile, owner))");
         });
+    }
+
+    static readonly Regex OwnerRx = new(@"\A-?[1-9][0-9]{0,18}\z", RegexOptions.Compiled);
+    public static bool TryOwner(string raw, out long owner)
+    {
+        owner = 0;
+        string s = (raw ?? "").Trim();
+        return OwnerRx.IsMatch(s) && long.TryParse(s, out owner) && owner != 0;
     }
 
     public static bool TryPair(string raw, out long owner, out long id)
@@ -190,6 +200,16 @@ public static class VkStore
         if (!TryPair(album, out long owner, out long id)) return null;
         await Api("video.getFromAlbum", new JObject { ["owner_id"] = owner, ["album_id"] = id, ["count"] = 1, ["offset"] = 0 });
         string title = (givenTitle ?? "").Trim();
+        if (title.Length == 0 || title.Length > 120)
+        {
+            try
+            {
+                var cover = await Api("video.getAlbumById", new JObject { ["owner_id"] = owner, ["album_id"] = id });
+                string apiTitle = ((string)cover?["title"] ?? "").Trim();
+                if (apiTitle.Length > 0 && apiTitle.Length <= 120) title = apiTitle;
+            }
+            catch { }
+        }
         if (title.Length == 0 || title.Length > 120) title = "Плейлист " + album;
         Ensure();
         HomeDb.With(c => HomeDb.Exec(c, @"INSERT INTO vk_subs(profile,album,title,at) VALUES(@p,@a,@t,@at)
@@ -258,6 +278,7 @@ public static class VkStore
         HomeDb.With(c =>
         {
             HomeDb.Exec(c, "DELETE FROM vk_subs WHERE profile=@p", ("@p", name));
+            HomeDb.Exec(c, "DELETE FROM vk_channels WHERE profile=@p", ("@p", name));
             HomeDb.Exec(c, "DELETE FROM vk_profiles WHERE name=@p", ("@p", name));
             if (clear) Profiles.Exec(c, "UPDATE user_profiles SET settings=@j WHERE id=@id", ("@j", cfg.ToString(Formatting.None)), ("@id", Profiles.CurrentId));
         });
@@ -268,7 +289,7 @@ public static class VkStore
     public static async Task<JObject> Search(string q)
     {
         var response = await Api("catalog.getVideoSearch", new JObject { ["q"] = q });
-        if (response == null) return new JObject { ["videos"] = new JArray(), ["albums"] = new JArray() };
+        if (response == null) return new JObject { ["videos"] = new JArray(), ["albums"] = new JArray(), ["channels"] = new JArray() };
         var seen = new HashSet<string>();
         var videos = new JArray();
         foreach (var item in VideoItems(response))
@@ -288,7 +309,159 @@ public static class VkStore
             albums.Add(new JObject { ["id"] = owner + "_" + id, ["title"] = (string)a["title"] ?? ("Плейлист " + owner + "_" + id), ["count"] = (int?)a["count"] ?? 0, ["thumb"] = Thumb(a) });
             if (albums.Count >= 12) break;
         }
-        return new JObject { ["videos"] = videos, ["albums"] = albums };
+        var names = new Dictionary<long, string>();
+        foreach (var g in (response["groups"] as JArray ?? new JArray()).Children<JObject>())
+            if ((long?)g["id"] is long gid && gid > 0) names[-gid] = (string)g["name"] ?? "";
+        foreach (var p in (response["profiles"] as JArray ?? new JArray()).Children<JObject>())
+            if ((long?)p["id"] is long uid && uid > 0) names[uid] = (((string)p["first_name"] ?? "") + " " + ((string)p["last_name"] ?? "")).Trim();
+        foreach (var card in videos.Children<JObject>())
+            if (long.TryParse((string)card["channel_id"], out long owner) && names.TryGetValue(owner, out string name) && name.Length > 0)
+                card["channel"] = name;
+        var channels = await ChannelCards(response);
+        return new JObject { ["videos"] = videos, ["albums"] = albums, ["channels"] = channels };
+    }
+
+    static async Task<JArray> ChannelCards(JObject response)
+    {
+        var groups = new List<long>();
+        var users = new List<long>();
+        var order = new List<long>();
+        foreach (var g in (response["groups"] as JArray ?? new JArray()).Children<JObject>())
+        {
+            long id = (long?)g["id"] ?? 0;
+            if (id <= 0 || order.Contains(-id)) continue;
+            order.Add(-id); groups.Add(id);
+            if (order.Count >= 12) break;
+        }
+        if (order.Count < 12)
+            foreach (var p in (response["profiles"] as JArray ?? new JArray()).Children<JObject>())
+            {
+                long id = (long?)p["id"] ?? 0;
+                if (id <= 0 || order.Contains(id)) continue;
+                order.Add(id); users.Add(id);
+                if (order.Count >= 12) break;
+            }
+        var info = new Dictionary<long, JObject>();
+        if (groups.Count > 0)
+        {
+            var full = await Api("groups.getById", new JObject { ["group_ids"] = string.Join(",", groups), ["fields"] = "description,members_count,photo_base" });
+            foreach (var g in (full?["groups"] as JArray ?? new JArray()).Children<JObject>())
+                if ((long?)g["id"] is long id && id > 0) info[-id] = ChannelInfo(g, -id, (string)g["name"], (int?)g["members_count"] ?? 0, (string)g["description"]);
+        }
+        if (users.Count > 0)
+        {
+            var full = await ApiToken("users.get", new JObject { ["user_ids"] = string.Join(",", users), ["fields"] = "about,followers_count,photo_base" });
+            var rows = full as JArray ?? full?["items"] as JArray ?? new JArray();
+            foreach (var u in rows.Children<JObject>())
+            {
+                long id = (long?)u["id"] ?? 0;
+                if (id <= 0) continue;
+                string about = (string)u["about"];
+                if (string.IsNullOrWhiteSpace(about)) about = (string)u["description"];
+                info[id] = ChannelInfo(u, id, (((string)u["first_name"] ?? "") + " " + ((string)u["last_name"] ?? "")).Trim(), (int?)u["followers_count"] ?? 0, about);
+            }
+        }
+        var arr = new JArray();
+        foreach (var owner in order)
+            if (info.TryGetValue(owner, out var card)) arr.Add(card);
+        return arr;
+    }
+
+    static JObject ChannelInfo(JObject source, long owner, string title, int followers, string description)
+    {
+        string text = Regex.Replace(description ?? "", @"\s+", " ").Trim();
+        if (text.Length > 500) text = text.Substring(0, 500).TrimEnd() + "…";
+        string photo = (string)source["photo_base"] ?? "";
+        if (!photo.StartsWith("https://", StringComparison.Ordinal)) photo = "";
+        return new JObject { ["id"] = owner.ToString(), ["title"] = string.IsNullOrWhiteSpace(title) ? "Канал " + owner : title, ["description"] = text, ["followers"] = followers, ["thumb"] = photo };
+    }
+
+    static readonly Dictionary<string, (JObject info, long at)> ChannelCache = new();
+
+    public static async Task<JObject> Channel(string ownerRaw)
+    {
+        if (!TryOwner(ownerRaw, out long owner)) return null;
+        var info = await OneChannel(owner);
+        if (info == null) return null;
+        var videos = new JArray();
+        int offset = 0;
+        for (int page = 0; page < 3 && videos.Count < 24; page++)
+        {
+            var response = await Api("video.get", new JObject { ["owner_id"] = owner, ["count"] = 50, ["offset"] = offset });
+            var items = response?["items"] as JArray ?? new JArray();
+            foreach (var item in items.Children<JObject>())
+            {
+                var card = VideoCard(item);
+                if (card == null) continue;
+                card["channel"] = (string)info["title"];
+                card["channel_id"] = owner.ToString();
+                videos.Add(card);
+                if (videos.Count >= 24) break;
+            }
+            int count = (int?)response?["count"] ?? 0;
+            offset += items.Count;
+            if (items.Count == 0 || offset >= count) break;
+        }
+        var subscribed = Channels(Pack()).Children<JObject>().Any(x => (string)x["id"] == owner.ToString());
+        return new JObject { ["info"] = new JObject(info) { ["subscribed"] = subscribed }, ["results"] = videos };
+    }
+
+    static async Task<JObject> OneChannel(long owner)
+    {
+        string key = owner.ToString();
+        long now = HomeDb.Now();
+        lock (ChannelCache)
+            if (ChannelCache.TryGetValue(key, out var hit) && now - hit.at < 15 * 60_000) return hit.info;
+        JObject info = null;
+        if (owner < 0)
+        {
+            var full = await Api("groups.getById", new JObject { ["group_ids"] = (-owner).ToString(), ["fields"] = "description,members_count,photo_base" });
+            var g = (full?["groups"] as JArray)?.Children<JObject>().FirstOrDefault();
+            if (g != null) info = ChannelInfo(g, owner, (string)g["name"], (int?)g["members_count"] ?? 0, (string)g["description"]);
+        }
+        else
+        {
+            var full = await ApiToken("users.get", new JObject { ["user_ids"] = owner, ["fields"] = "about,followers_count,photo_base" });
+            var u = (full as JArray ?? full?["items"] as JArray)?.Children<JObject>().FirstOrDefault();
+            if (u != null) info = ChannelInfo(u, owner, (((string)u["first_name"] ?? "") + " " + ((string)u["last_name"] ?? "")).Trim(), (int?)u["followers_count"] ?? 0, (string)u["about"] ?? (string)u["description"]);
+        }
+        if (info == null) return null;
+        lock (ChannelCache)
+        {
+            if (ChannelCache.Count > 200) ChannelCache.Clear();
+            ChannelCache[key] = (info, now);
+        }
+        return info;
+    }
+
+    public static JArray Channels(string profile)
+    {
+        Ensure();
+        var a = new JArray();
+        foreach (var r in HomeDb.With(c => HomeDb.Query(c, "SELECT owner, title, thumb, at FROM vk_channels WHERE profile=@p ORDER BY title COLLATE NOCASE", ("@p", profile))))
+            a.Add(new JObject { ["id"] = r[0] as string, ["title"] = r[1] as string, ["thumb"] = r[2] as string ?? "", ["at"] = Convert.ToInt64(r[3]) });
+        return a;
+    }
+
+    public static async Task<JObject> AddChannel(string profile, string ownerRaw)
+    {
+        if (!TryOwner(ownerRaw, out long owner)) return null;
+        var info = await OneChannel(owner);
+        if (info == null) return null;
+        Ensure();
+        HomeDb.With(c => HomeDb.Exec(c, @"INSERT INTO vk_channels(profile,owner,title,thumb,at) VALUES(@p,@o,@t,@h,@at)
+            ON CONFLICT(profile,owner) DO UPDATE SET title=@t, thumb=@h",
+            ("@p", profile), ("@o", owner.ToString()), ("@t", (string)info["title"]), ("@h", (string)info["thumb"] ?? ""), ("@at", HomeDb.Now())));
+        feedRev++;
+        return info;
+    }
+
+    public static void RemoveChannel(string profile, string ownerRaw)
+    {
+        if (!TryOwner(ownerRaw, out long owner)) return;
+        Ensure();
+        HomeDb.With(c => HomeDb.Exec(c, "DELETE FROM vk_channels WHERE profile=@p AND owner=@o", ("@p", profile), ("@o", owner.ToString())));
+        feedRev++;
     }
 
     public static async Task<JObject> Feed(string profile)
@@ -317,6 +490,24 @@ public static class VkStore
                 try { rows.AddRange(await ReadAlbum(owner, album, (string)sub["id"], title, 3)); }
                 catch { }
             }
+            foreach (var channel in Channels(profile).Children<JObject>().Take(12))
+            {
+                if (!long.TryParse((string)channel["id"], out long owner)) continue;
+                string title = (string)channel["title"];
+                try
+                {
+                    var response = await Api("video.get", new JObject { ["owner_id"] = owner, ["count"] = 20, ["offset"] = 0 });
+                    foreach (var item in (response?["items"] as JArray ?? new JArray()).Children<JObject>())
+                    {
+                        var card = VideoCard(item);
+                        if (card == null) continue;
+                        card["channel"] = title;
+                        card["channel_id"] = owner.ToString();
+                        rows.Add(card);
+                    }
+                }
+                catch { }
+            }
             var fresh = new JArray(rows.GroupBy(x => (string)x["id"]).Select(g => g.First()).OrderByDescending(x => (long?)x["date"] ?? 0).Take(80));
             if (rev == feedRev) { feedCache = fresh; feedAt = HomeDb.Now(); feedProfile = profile; }
             return fresh.Children<JObject>().ToList();
@@ -327,10 +518,89 @@ public static class VkStore
     public static async Task<JObject> Album(string albumId)
     {
         if (!TryPair(albumId, out long owner, out long album)) return null;
-        var rows = await ReadAlbum(owner, album, albumId, null, 4);
+        string title = "";
+        string thumb = "";
+        int count = 0;
+        try
+        {
+            var cover = await Api("video.getAlbumById", new JObject { ["owner_id"] = owner, ["album_id"] = album });
+            title = ((string)cover?["title"] ?? "").Trim();
+            thumb = Thumb(cover);
+            count = (int?)cover?["count"] ?? 0;
+        }
+        catch { }
+        var rows = await ReadAlbum(owner, album, albumId, string.IsNullOrEmpty(title) ? null : title, 4);
         var seen = Watched(Profile());
         foreach (var card in rows) card["seen"] = seen.Contains((string)card["id"]);
-        return new JObject { ["id"] = owner + "_" + album, ["results"] = new JArray(rows) };
+        string id = owner + "_" + album;
+        bool subscribed = Subs(Pack()).Children<JObject>().Any(x => (string)x["id"] == id);
+        var info = new JObject
+        {
+            ["id"] = id,
+            ["kind"] = "album",
+            ["title"] = string.IsNullOrEmpty(title) ? "Плейлист" : title,
+            ["thumb"] = thumb,
+            ["count"] = count > 0 ? count : rows.Count,
+            ["subscribed"] = subscribed
+        };
+        return new JObject { ["id"] = id, ["info"] = info, ["results"] = new JArray(rows) };
+    }
+
+    public static async Task<JObject> AddAny(string profile, string raw, string givenTitle)
+    {
+        if (TryAlbumLink(raw, out _, out _))
+        {
+            var saved = await Add(profile, raw, givenTitle);
+            if (saved != null) saved["kind"] = "album";
+            return saved;
+        }
+        long? owner = await ChannelRef(raw);
+        if (owner == null) return null;
+        var channel = await AddChannel(profile, owner.Value.ToString());
+        if (channel != null) channel["kind"] = "channel";
+        return channel;
+    }
+
+    static async Task<long?> ChannelRef(string raw)
+    {
+        long owner;
+        string s = (raw ?? "").Trim();
+        if (s.Length == 0 || s.Length > 300 || s.Contains('_')) return null;
+        if (s.StartsWith("-", StringComparison.Ordinal) && TryOwner(s, out owner)) return owner;
+        if (Regex.IsMatch(s, @"\A\d{1,18}\z"))
+        {
+            long n = long.Parse(s);
+            try { if (await OneChannel(-n) != null) return -n; } catch { }
+            try { if (await OneChannel(n) != null) return n; } catch { }
+            return null;
+        }
+        string screen = null;
+        if (Uri.TryCreate(s, UriKind.Absolute, out var uri) && uri.Scheme == "https" && (uri.Host == "vkvideo.ru" || uri.Host == "vk.com" || uri.Host == "m.vk.com"))
+        {
+            string path = uri.AbsolutePath.Trim('/');
+            var club = Regex.Match(path, @"(?:^|/)(?:club|public|event)(\d+)", RegexOptions.IgnoreCase);
+            if (club.Success && long.TryParse(club.Groups[1].Value, out owner) && owner != 0) return -owner;
+            var videos = Regex.Match(path, @"(?:^|/)videos(-?\d+)", RegexOptions.IgnoreCase);
+            if (videos.Success && long.TryParse(videos.Groups[1].Value, out owner) && owner != 0) return owner;
+            var at = Regex.Match(path, @"(?:^|/)@([A-Za-z0-9_.]{2,64})");
+            if (at.Success) screen = at.Groups[1].Value;
+            else
+            {
+                string last = path.Split('/').LastOrDefault() ?? "";
+                if (Regex.IsMatch(last, @"\A[A-Za-z][A-Za-z0-9_.]{1,63}\z")) screen = last;
+            }
+        }
+        else if (Regex.IsMatch(s, @"\A@?[A-Za-z][A-Za-z0-9_.]{1,63}\z")) screen = s.TrimStart('@');
+        if (string.IsNullOrEmpty(screen)) return null;
+        JObject resolved;
+        try { resolved = await Api("utils.resolveScreenName", new JObject { ["screen_name"] = screen }); }
+        catch { return null; }
+        string type = (string)resolved?["type"] ?? "";
+        long id = (long?)resolved?["object_id"] ?? 0;
+        if (id <= 0) return null;
+        if (type == "group" || type == "page" || type == "event") return -id;
+        if (type == "user" || type == "profile") return id;
+        return null;
     }
 
     static async Task<List<JObject>> ReadAlbum(long owner, long album, string albumId, string title, int pages)
@@ -467,11 +737,14 @@ public static class VkStore
             ["title"] = (string)item["title"] ?? "VK Видео",
             ["duration"] = (int?)item["duration"] ?? 0,
             ["date"] = (long?)item["date"] ?? 0,
+            ["channel_id"] = owner.ToString(),
             ["thumb"] = thumb
         };
     }
 
-    static async Task<JObject> Api(string method, JObject fields)
+    static async Task<JObject> Api(string method, JObject fields) => await ApiToken(method, fields) as JObject;
+
+    static async Task<JToken> ApiToken(string method, JObject fields)
     {
         var tok = await Token();
         var form = new Dictionary<string, string> { ["access_token"] = tok.Token, ["device_id"] = DeviceId(), ["client_id"] = tok.Client };
@@ -501,7 +774,7 @@ public static class VkStore
                 if (c == 6 || c == 9 || c == 29) throw new InvalidOperationException("rate_limited");
                 throw new InvalidOperationException("vk_api");
             }
-            return json["response"] as JObject;
+            return json["response"];
         }
         throw new InvalidOperationException("rate_limited");
     }
@@ -638,9 +911,71 @@ public class VkController : BaseController
             var found = await VkStore.Search(q);
             if (kind == "video") return Json(new { results = found["videos"] });
             if (kind == "album") return Json(new { results = found["albums"] });
+            if (kind == "channel") return Json(new { results = found["channels"] });
             return Json(found);
         }
         catch (Exception ex) { return Fail(ex); }
+    }
+
+    [HttpGet, AllowAnonymous]
+    [Route("vk/channel")]
+    public async Task<ActionResult> Channel(string id = null)
+    {
+        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!ProfilePolicy.SourceEnabled("vk")) return Json(new { error = "source_disabled", source = "vk" }, 403);
+        try
+        {
+            var page = await VkStore.Channel(id);
+            return page == null ? Json(new { error = "bad_channel" }, 400) : Json(page);
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    [HttpGet, AllowAnonymous]
+    [Route("vk/channels")]
+    public ActionResult Channels(string profile = null)
+    {
+        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!ProfilePolicy.SourceEnabled("vk")) return Json(new { error = "source_disabled", source = "vk" }, 403);
+        string pack = VkStore.Target(profile);
+        if (pack == null) return Json(new { error = "bad_vk_profile" }, 400);
+        return Json(new { channels = VkStore.Channels(pack) });
+    }
+
+    [HttpPost, AllowAnonymous]
+    [Route("vk/channels/add")]
+    public async Task<ActionResult> AddChannel(string profile = null)
+    {
+        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!ProfilePolicy.SourceEnabled("vk")) return Json(new { error = "source_disabled", source = "vk" }, 403);
+        string pack = VkStore.Target(profile);
+        if (pack == null) return Json(new { error = "bad_vk_profile" }, 400);
+        string body;
+        using (var rd = new StreamReader(Request.Body, Encoding.UTF8)) body = await rd.ReadToEndAsync();
+        string id = null;
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            try { id = (string)JObject.Parse(body)["id"]; } catch { return Json(new { error = "bad_body" }, 400); }
+        }
+        id ??= Request.Query["id"];
+        try
+        {
+            var saved = await VkStore.AddChannel(pack, id);
+            return saved == null ? Json(new { error = "bad_channel" }, 400) : Json(saved);
+        }
+        catch (Exception ex) { return Fail(ex); }
+    }
+
+    [HttpPost, AllowAnonymous]
+    [Route("vk/channels/remove")]
+    public ActionResult RemoveChannel(string id = null, string profile = null)
+    {
+        if (!Guard.Ok(Request)) return Json(new { error = "forbidden" }, 403);
+        if (!ProfilePolicy.SourceEnabled("vk")) return Json(new { error = "source_disabled", source = "vk" }, 403);
+        string pack = VkStore.Target(profile);
+        if (pack == null) return Json(new { error = "bad_vk_profile" }, 400);
+        VkStore.RemoveChannel(pack, id);
+        return Json(new { ok = true });
     }
 
     [HttpGet, AllowAnonymous]
@@ -769,8 +1104,8 @@ public class VkController : BaseController
         string raw = (string)o["url"] ?? (string)o["id"];
         try
         {
-            var saved = await VkStore.Add(pack, raw, (string)o["title"]);
-            return saved == null ? Json(new { error = "bad_album" }, 400) : Json(saved);
+            var saved = await VkStore.AddAny(pack, raw, (string)o["title"]);
+            return saved == null ? Json(new { error = "bad_target" }, 400) : Json(saved);
         }
         catch (Exception ex) { return Fail(ex); }
     }
