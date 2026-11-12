@@ -29,11 +29,25 @@
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
-  var playGen = 0, playXhr = null;
+  var playGen = 0, playXhr = null, playProgressXhr = null;
+  function cancelPlay() {
+    playGen++;
+    try { if (playXhr) playXhr.abort(); } catch (e) {}
+    try { if (playProgressXhr) playProgressXhr.abort(); } catch (e) {}
+    playXhr = playProgressXhr = null;
+  }
   function play(id, title) {
-    var gen = ++playGen;
-    if (playXhr) { try { playXhr.abort(); } catch (e) {} playXhr = null; }
-    function stale() { return gen !== playGen; }
+    cancelPlay();
+    var gen = playGen;
+    var active = null;
+    try { active = window.Lampa && Lampa.Activity ? Lampa.Activity.active() : null; } catch (e) {}
+    var owner = window.HomeUser ? JSON.stringify(HomeUser.owner) : '';
+    function stale() {
+      if (gen !== playGen) return true;
+      if (window.HomeUser && JSON.stringify(HomeUser.owner) !== owner) return true;
+      try { if (window.Lampa && Lampa.Activity && active !== Lampa.Activity.active()) return true; } catch (e) {}
+      return false;
+    }
     var back = ctrl();
     playXhr = api('/vk/video?id=' + encodeURIComponent(id) + '&maxh=' + maxH(), function (d) {
       playXhr = null;
@@ -49,10 +63,11 @@
           data.timeline = { hash: hash, time: (progress && progress.position) || 0, duration: d.duration || (progress && progress.duration) || 0, percent: (progress && progress.percent) || 0 };
         }
         try { Lampa.Player.play(data); } catch (e) { noty('VK: не удалось запустить плеер'); }
-        setTimeout(function () { try { Lampa.Controller.toggle(back); } catch (e) {} }, 700);
+        setTimeout(function () { if (stale()) return; try { Lampa.Controller.toggle(back); } catch (e) {} }, 700);
       }
-      if (window.HomeUser) api('/vk/progress?id=' + encodeURIComponent(d.id), function (p) { if (!stale()) launch(p); }, function () { if (!stale()) launch(null); });
-      else launch(null);
+      if (window.HomeUser) {
+        playProgressXhr = api('/vk/progress?id=' + encodeURIComponent(d.id), function (p) { playProgressXhr = null; if (!stale()) launch(p); }, function () { playProgressXhr = null; if (!stale()) launch(null); });
+      } else launch(null);
     }, function (x) {
       playXhr = null;
       if (stale()) return;
@@ -186,6 +201,8 @@
         else results = (d.results || []).map(cardOf);
         if (vk.mode === 'channel' || vk.mode === 'album') {
           info = d.info || { id: vk.id, title: object.title || '', subscribed: false, kind: vk.mode === 'album' ? 'album' : 'channel' };
+          info.shown = (d.results || []).length;
+          info.total = info.total || info.count || 0;
           results.unshift({ id: 'vkhead', vk_head: true, title: info.title || object.title || '', name: info.title || '', overview: info.description || '', img: poster(info.thumb), source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0 });
         }
         if (vk.mode === 'albums') results.push({ id: 'vkadd', vk_add: true, title: 'Добавить', name: 'Добавить', overview: 'плейлист или канал', source: 'vk', poster_path: '', backdrop_path: '', vote_average: 0, params: { style: { name: 'wide' } } });
@@ -222,6 +239,7 @@
       var followers = nf(i.followers);
       if (i.kind === 'album' && i.count) box.append($('<div class="vk-chead__meta"></div>').text(i.count + ' видео'));
       else if (followers) box.append($('<div class="vk-chead__meta"></div>').text(followers + ' подписчиков'));
+      if (i.total && i.shown && i.total > i.shown) box.append($('<div class="vk-chead__meta"></div>').text('Показаны первые ' + i.shown + ' из ' + i.total));
       if (i.description) box.append($('<div class="vk-chead__descr"></div>').text(i.description));
       var btn = $('<div class="vk-chead__btn"></div>').text(i.subscribed ? 'Отписаться' : 'Подписаться').data('on', !!i.subscribed);
       box.append(btn);

@@ -386,6 +386,7 @@ public static class VkStore
         if (info == null) return null;
         var videos = new JArray();
         int offset = 0;
+        int total = 0;
         for (int page = 0; page < 3 && videos.Count < 24; page++)
         {
             var response = await Api("video.get", new JObject { ["owner_id"] = owner, ["count"] = 50, ["offset"] = offset });
@@ -400,11 +401,12 @@ public static class VkStore
                 if (videos.Count >= 24) break;
             }
             int count = (int?)response?["count"] ?? 0;
+            if (count > total) total = count;
             offset += items.Count;
             if (items.Count == 0 || offset >= count) break;
         }
         var subscribed = Channels(Pack()).Children<JObject>().Any(x => (string)x["id"] == owner.ToString());
-        return new JObject { ["info"] = new JObject(info) { ["subscribed"] = subscribed }, ["results"] = videos };
+        return new JObject { ["info"] = new JObject(info) { ["subscribed"] = subscribed, ["total"] = total }, ["results"] = videos };
     }
 
     static async Task<JObject> OneChannel(long owner)
@@ -542,6 +544,7 @@ public static class VkStore
             ["title"] = string.IsNullOrEmpty(title) ? "Плейлист" : title,
             ["thumb"] = thumb,
             ["count"] = count > 0 ? count : rows.Count,
+            ["total"] = count > 0 ? count : rows.Count,
             ["subscribed"] = subscribed
         };
         return new JObject { ["id"] = id, ["info"] = info, ["results"] = new JArray(rows) };

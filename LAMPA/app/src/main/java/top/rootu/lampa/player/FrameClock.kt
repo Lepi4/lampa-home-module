@@ -48,11 +48,13 @@ class FrameClock(
     private var condition = "neutral"
     private var started = false
     @Volatile private var stopped = true
+    private val generation = java.util.concurrent.atomic.AtomicInteger()
+    private var tickGen = 0
     private var minuteTicks = 0
     private val tick = object : Runnable {
         override fun run() {
-            if (!visible) return
-            redraw()
+            if (!visible || tickGen != generation.get()) return
+            redraw(tickGen)
             minuteTicks++
             if (minuteTicks >= 3) {
                 minuteTicks = 0
@@ -66,24 +68,32 @@ class FrameClock(
         if (started) return
         started = true
         stopped = false
+        val ticket = generation.incrementAndGet()
+        tickGen = ticket
         Thread {
             val on = readEnabled()
-            if (stopped) return@Thread
-            visible = on
-            if (on) {
-                refreshWeather()
-                redraw()
-                ui.post { ui.postDelayed(tick, 60_000) }
+            if (ticket != generation.get()) return@Thread
+            if (on) refreshWeather(ticket)
+            if (ticket != generation.get()) return@Thread
+            ui.post {
+                if (ticket != generation.get()) return@post
+                visible = on
+                if (on) {
+                    redraw(ticket)
+                    ui.postDelayed(tick, 60_000)
+                }
+                onDecision(on)
             }
-            ui.post { onDecision(on) }
         }.apply { isDaemon = true; name = "frame-clock" }.start()
     }
 
     fun stop() {
+        generation.incrementAndGet()
         stopped = true
         started = false
         visible = false
         ui.removeCallbacks(tick)
+        plate?.visibility = android.view.View.GONE
     }
 
     fun frame(): Bitmap = synchronized(lock) { bitmap }
@@ -110,7 +120,7 @@ class FrameClock(
         } catch (_: Exception) { true }
     }
 
-    private fun refreshWeather() {
+    private fun refreshWeather(ticket: Int) {
         if (!base.startsWith("http://") && !base.startsWith("https://")) return
         try {
             val c = URL(base.trimEnd('/') + "/home/weather").openConnection() as HttpURLConnection
@@ -118,6 +128,7 @@ class FrameClock(
             headers(c)
             if (c.responseCode == 200) {
                 val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+                if (ticket != generation.get()) return
                 if (o.optBoolean("weather") && !o.isNull("temp")) {
                     temp = o.optDouble("temp")
                     condition = o.optString("condition", "neutral")
@@ -125,10 +136,10 @@ class FrameClock(
             }
             c.disconnect()
         } catch (_: Exception) {}
-        ui.postDelayed({ if (!stopped && visible) Thread { refreshWeather() }.apply { isDaemon = true }.start() }, 15 * 60_000)
+        ui.postDelayed({ if (ticket == generation.get()) Thread { refreshWeather(ticket) }.apply { isDaemon = true }.start() }, 15 * 60_000)
     }
 
-    private fun redraw() {
+    private fun redraw(ticket: Int) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = Color.WHITE
         paint.textAlign = Paint.Align.CENTER
