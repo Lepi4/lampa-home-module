@@ -29,6 +29,7 @@ window.__home_lift_before_native=function(data,next,fail){
           data.playlist[0].url=packet.url;
           data.lift_voice_rep=packet.lift_voice_rep;data.lift_audio_map=packet.lift_audio_map;
           data.lift_video_formats=packet.lift_video_formats;
+          data.max_height=1080; // Lift has a fixed source policy, independent of other sources' caps.
           data.home_clock_ms=fresh.now;
           // A reset or a new position may arrive from another device while the dialog is open.
           window.__home_prepare_progress(data,function(){

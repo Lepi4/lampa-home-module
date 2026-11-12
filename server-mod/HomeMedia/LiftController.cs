@@ -51,7 +51,7 @@ public class LiftController:BaseController
         catch(JsonException){return J(new{error="lift_invalid_json"},502);}
         catch(System.Xml.XmlException){return J(new{error="lift_invalid_mpd"},502);}
         catch(InvalidOperationException e){return J(new{error=e.Message},e.Message=="lift_not_configured"?503:e.Message=="source_disabled"?403:409);}
-        catch(InvalidDataException e){return J(new{error=e.Message},e.Message.Contains("voice")?409:502);}
+        catch(InvalidDataException e){return J(new{error=e.Message},e.Message.Contains("voice")||e.Message=="lift_1080_unavailable"?409:502);}
         catch(OperationCanceledException){return J(new{error="lift_timeout"},504);}
         catch(HttpRequestException){return J(new{error="lift_upstream_unavailable"},502);}
     }
@@ -86,7 +86,7 @@ public class LiftController:BaseController
         var p=await LiftRuntime.Client.Playlist(item,HttpContext.RequestAborted);
         var e=LiftPlaylist.Select(p,t.Media=="movie",season,episode);
         var uri=LiftVp9Policy.Manifest(e);var xml=await LiftRuntime.Client.Mpd(uri.AbsoluteUri,HttpContext.RequestAborted);
-        var descriptor=LiftVp9Policy.Describe(e,xml,0);
+        var descriptor=LiftVp9Policy.Describe(e,xml);
         if(((JArray)descriptor["voices"]).Count==0)throw new InvalidDataException("lift_audio_mapping_unverified");
         var binding=LiftBindings.Put(t,item,t.Media=="movie",season,episode);
         return new{ok=true,binding};

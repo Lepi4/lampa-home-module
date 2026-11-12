@@ -14,7 +14,7 @@
       // profile-start/profiles-web already attach the frozen page owner's session.
       // Repeating setRequestHeader combines values and makes the session invalid.
       success:function(r){if(c.attempt.valid())ok(r);},
-      error:function(x){if(!c.attempt.valid())return;var code=x.responseJSON&&x.responseJSON.error;finish(c,false,code||'Lift не отвечает');}});
+      error:function(x){if(!c.attempt.valid())return;var code=x.responseJSON&&x.responseJSON.error;finish(c,false,code==='lift_1080_unavailable'?'Lift: у этого видео нет 1080p VP9':code||'Lift не отвечает');}});
     manager.requests.push(xhr);
   }
   function finish(c,ok,message){

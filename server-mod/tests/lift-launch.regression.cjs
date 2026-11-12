@@ -1,13 +1,13 @@
 const fs=require('fs'),path=require('path'),vm=require('vm'),test=require('node:test'),assert=require('node:assert/strict');
 const dir=path.join(__dirname,'../HomeMedia');
-function fixture(){
+function fixture(maxHeight=0){
  const owner={token:'fixture',profile:{id:'u_default',is_admin:true,is_child:false}},activity={},requests=[],dialogs=[],launched=[],timers=[],fail=[];
  const window={HomeSrc:{},__home_lift_enabled:true,appready:true,HomeUser:{owner},AndroidJS:{liftVersion:()=>1},location:{origin:'http://fixture'}};
  const Lampa={Activity:{active:()=>activity},Noty:{show:s=>fail.push(s)},Listener:{follow(){}},Controller:{enabled:()=>({name:'full_start'}),toggle(){}},Select:{show:d=>dialogs.push(d)},Android:{openPlayer:(url,data)=>launched.push({url,data})}};
  Lampa.Player={play:d=>Lampa.Android.openPlayer(d.url,d)};
  window.Lampa=Lampa;
  function $(){return {}};$.extend=Object.assign;$.ajax=r=>{r.abort=()=>{};requests.push(r);return r};
- const ctx={window,Lampa,HomeSrc:window.HomeSrc,HomeUser:window.HomeUser,AndroidJS:window.AndroidJS,location:window.location,$,BASE:'http://fixture',setInterval:f=>timers.push(f),clearInterval(){},setTimeout(){},Date,localStorage:{getItem:()=>null},registerHashes(){},getMaxH:()=>0,getAfr:()=>true};
+ const ctx={window,Lampa,HomeSrc:window.HomeSrc,HomeUser:window.HomeUser,AndroidJS:window.AndroidJS,location:window.location,$,BASE:'http://fixture',setInterval:f=>timers.push(f),clearInterval(){},setTimeout(){},Date,localStorage:{getItem:()=>null},registerHashes(){},getMaxH:()=>maxHeight,getAfr:()=>true};
  vm.createContext(ctx);
  vm.runInContext(fs.readFileSync(path.join(dir,'lift-flow.js'),'utf8'),ctx);ctx.LiftFlow=window.LiftFlow;
  vm.runInContext(fs.readFileSync(path.join(dir,'lift.js'),'utf8'),ctx);ctx.HomeLift=window.HomeLift;
@@ -29,6 +29,10 @@ test('Lift waits for position decision, then passes refreshed URI to native brid
 test('Lift start from zero affects both packet and selected file',()=>{
  const f=fixture();f.start();f.reply('/home/lift/position-context',{compatible:false});f.dialogs[0].onSelect({decision:'start_zero'});f.reply('/home/lift/resolve',f.descriptor('https://media.example/fresh.mpd'));
  assert.equal(f.launched[0].data.timeline.time,0);assert.equal(f.launched[0].data.playlist[0].timeline.time,0);
+});
+test('Lift retains fixed 1080 after the common device-height wrapper',()=>{
+ const f=fixture(720);f.start();f.reply('/home/lift/position-context',{compatible:true});f.dialogs[0].onSelect({decision:'resume'});f.reply('/home/lift/resolve',f.descriptor('https://media.example/fresh.mpd'));
+ assert.equal(f.launched[0].data.max_height,1080);
 });
 test('profile switch during resume dialog prevents resolve and native launch',()=>{
  const f=fixture();f.start();f.reply('/home/lift/position-context',{compatible:false});const before=f.requests.length;f.window.HomeUser.owner={profile:{id:'other'},token:'other'};f.dialogs[0].onSelect({decision:'resume'});

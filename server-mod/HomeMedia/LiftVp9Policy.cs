@@ -10,6 +10,7 @@ namespace HomeMedia;
 // Authentication, mapping and policy checks belong to the caller.
 public static class LiftVp9Policy
 {
+    public const int FixedHeight=1080;
     public static Uri Manifest(JObject item)
     {
         string raw=item?["streams"]?["dash_vp9"]?.Type==JTokenType.String
@@ -25,10 +26,9 @@ public static class LiftVp9Policy
     static string Attr(XElement rep,XElement adaptation,string name)
         =>(string)rep.Attribute(name)??(string)adaptation.Attribute(name);
 
-    public static JObject Describe(JObject item,string xml,int maxHeight)
+    public static JObject Describe(JObject item,string xml)
     {
         var uri=Manifest(item);
-        if(maxHeight<0 || maxHeight>4320)throw new ArgumentOutOfRangeException(nameof(maxHeight));
         var settings=new XmlReaderSettings {
             DtdProcessing=DtdProcessing.Prohibit,XmlResolver=null,
             MaxCharactersInDocument=2*1024*1024
@@ -51,15 +51,23 @@ public static class LiftVp9Policy
             if(!int.TryParse(Attr(r,a,"width"),out int width)
                 || !int.TryParse(Attr(r,a,"height"),out int height)
                 || width<=0 || height<=0)continue;
-            // Same landscape quality-class rule as the current HomePlayerActivity.
-            if(maxHeight>0 && width>(long)maxHeight*16/9+8)continue;
             videos.Add(new JObject {
                 ["id"]=(string)r.Attribute("id"),["width"]=width,["height"]=height,
                 ["codecs"]=codec,["frame_rate"]=Attr(r,a,"frameRate"),
                 ["bandwidth"]=long.TryParse(Attr(r,a,"bandwidth"),out long b)?b:0
             });
         }
-        if(videos.Count==0)throw new InvalidDataException("lift_no_vp9_within_device_limit");
+        // A single representation makes Media3's override fixed, not adaptive.
+        // Keep the player's 1080 quality-class rule, including cropped cinema frames.
+        var selected=videos.Children<JObject>().Where(v=>
+            ((int)v["width"]>=1800 || (int)v["height"]>=1000)
+            && (int)v["width"]<=FixedHeight*16/9+8 && (int)v["height"]<=FixedHeight+8)
+            .OrderByDescending(v=>(long)v["bandwidth"]).ThenBy(v=>(string)v["id"],StringComparer.Ordinal).FirstOrDefault();
+        if(selected==null)throw new InvalidDataException("lift_1080_unavailable");
+        string selectedId=(string)selected["id"];
+        if(string.IsNullOrEmpty(selectedId)||videos.Children<JObject>().Count(v=>(string)v["id"]==selectedId)!=1)
+            throw new InvalidDataException("lift_video_mapping_ambiguous");
+        videos=new JArray(selected);
         var voices=new JArray();
         var audio=item["audio"] as JObject;
         if(audio!=null) {
@@ -85,6 +93,7 @@ public static class LiftVp9Policy
         return new JObject {
             ["source"]="lift",["protocol"]="dash",["codec"]="vp9",
             ["mime"]="application/dash+xml",["video"]=uri.AbsoluteUri,
+            ["quality_height"]=FixedHeight,["quality_fixed"]=true,
             ["representations"]=videos,["voices"]=voices
         };
     }

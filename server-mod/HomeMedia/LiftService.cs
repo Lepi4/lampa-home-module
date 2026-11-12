@@ -18,12 +18,6 @@ public sealed class LiftService
         var card=await KpMap.TmdbCard(target.Media,target.Tmdb);
         if(card==null || !await ProfilePolicy.Allows(card))throw new UnauthorizedAccessException("parental_blocked");
     }
-    public static int DeviceHeight()=>HomeDb.With(c=> {
-        var rows=HomeDb.Query(c,"SELECT cfg FROM devices WHERE id=@d",("@d",Profiles.Current.Device));
-        var cfg=rows.Count==0?new JObject():JObject.Parse((string)rows[0][0]??"{}");
-        // General VOD quality belongs to this device. playback.max_height is a torrent filter.
-        return int.TryParse(cfg["maxh"]?.ToString(),out int legacy) && legacy is 0 or 720 or 1080 or 2160?legacy:1080;
-    });
     public async Task<JObject> Resolve(LiftTarget target,string voiceName,string expectedRevision,CancellationToken ct)
     {
         await Require(target);ct.ThrowIfCancellationRequested();
@@ -34,7 +28,7 @@ public sealed class LiftService
         var entry=LiftPlaylist.Select(playlist,(bool)binding["movie"],(int)binding["provider_season"],(int)binding["provider_episode"]);
         var uri=LiftVp9Policy.Manifest(entry);client.CheckMedia(uri.AbsoluteUri);
         var xml=await client.Mpd(uri.AbsoluteUri,ct);
-        var d=LiftVp9Policy.Describe(entry,xml,DeviceHeight());
+        var d=LiftVp9Policy.Describe(entry,xml);
         if((d["voices"] as JArray)?.Count==0)throw new InvalidDataException("lift_audio_mapping_unverified");
         if(voiceName!=null) {
             var hits=((JArray)d["voices"]).Children<JObject>().Where(v=>(string)v["name"]==voiceName).ToArray();

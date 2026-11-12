@@ -11,7 +11,7 @@
     var tl={hash:h,time:0,duration:r.duration||0,percent:0,received:true};
     var item={url:r.video,title:r.title,timeline:tl,hs:resume,season:ctx.season,episode:ctx.episode};
     return {url:r.video,title:r.title,card:ctx.card,hs:resume,timeline:tl,playlist:[item],
-      home_player:true,home_base:ctx.base,home_source:'lift',home_mime:'application/dash+xml',
+      home_player:true,home_base:ctx.base,home_source:'lift',home_mime:'application/dash+xml',max_height:1080,
       home_clock_ms:r.now,headers:r.headers||{},lift_binding_revision:r.binding_revision,
       lift_voice_rep:voice.representation_id,lift_audio_map:JSON.stringify(r.voices),
       lift_video_formats:JSON.stringify(r.representations),
