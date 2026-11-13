@@ -506,7 +506,8 @@ public class KinoPubController : BaseController
     static readonly ConcurrentDictionary<string, byte> allowedHosts = new();
 
     static bool HostAllowed(string host)
-        => host == "kino.watch" || host.EndsWith(".kino.watch") || host == "srvkp.com" || host.EndsWith(".srvkp.com") || host.EndsWith(".cdntogo.net") || allowedHosts.ContainsKey(host);
+        // HLS4/HLS2 masters use this exact API host; do not allow arbitrary service-kp.com subdomains.
+        => host == "api.service-kp.com" || host == "kino.watch" || host.EndsWith(".kino.watch") || host == "srvkp.com" || host.EndsWith(".srvkp.com") || host.EndsWith(".cdntogo.net") || allowedHosts.ContainsKey(host);
 
     static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
