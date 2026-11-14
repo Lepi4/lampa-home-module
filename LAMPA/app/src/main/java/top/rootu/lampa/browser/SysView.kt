@@ -315,21 +315,16 @@ class SysView(override val mainActivity: MainActivity, override val viewResId: I
                 }
             }
 
-            @SuppressLint("WebViewClientOnReceivedSslError")
             override fun onReceivedSslError(
                 view: WebView?,
                 handler: SslErrorHandler?,
                 error: SslError?
             ) {
-                debugLog("Ignore SSL error: $error")
                 handler?.cancel()
-                view?.loadDataWithBaseURL(
-                    null,
-                    "<html><body style='background:#111;color:#eee;font-family:sans-serif;padding:2em'><h2>Ошибка сертификата</h2><p>${error?.primaryError ?: "SSL"}</p></body></html>",
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
+                // This callback also covers images, scripts and frames. Reject the
+                // resource without replacing the working local HTTP application.
+                val host = runCatching { Uri.parse(error?.url.orEmpty()).host }.getOrNull().orEmpty()
+                Log.w("HomeWeb", "ssl_resource_rejected code=${error?.primaryError} host=$host")
             }
         }
 

@@ -735,14 +735,18 @@ class MainActivity : BaseActivity(),
                 // Media Center: ждём готовности Lampa (window.appready) и сообщаем оболочке
                 launch {                     // пульс: пока страница отвечает, mcPongAt обновляется; сторож оболочки следит за ним
                     while (isActive && generation == mcDocument.generation) {
-                        browser?.evaluateJavascript("1") { _: String -> mcDocument.pong(generation, android.os.SystemClock.elapsedRealtime()) }
+                        browser?.evaluateJavascript(McDocumentState.HEALTH_PROBE) { result: String ->
+                            mcDocument.observe(generation, result == "true", android.os.SystemClock.elapsedRealtime())
+                        }
                         delay(5000)
                     }
                 }
                 launch {
                     var tries = 0
                     while (tries++ < 240 && !mcReady && generation == mcDocument.generation) {
-                        browser?.evaluateJavascript("(function(){return !!window.appready})()") { r: String -> if (r == "true") mcDocument.markReady(generation) }
+                        browser?.evaluateJavascript(McDocumentState.HEALTH_PROBE) { result: String ->
+                            mcDocument.observe(generation, result == "true", android.os.SystemClock.elapsedRealtime())
+                        }
                         delay(500)
                     }
                     // окно было пересоздано во время просмотра: открываем последний экран Lampa (карточка, список) вместо главной

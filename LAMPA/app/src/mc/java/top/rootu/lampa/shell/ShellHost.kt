@@ -227,7 +227,8 @@ class ShellHost(private val a: MainActivity) : McHostApi {
             } catch (_: Exception) {}
             ui.post {
                 probing.set(false)
-                if (destroyed || generation != MainActivity.mcDocument.generation) return@post
+                if (destroyed || generation != MainActivity.mcDocument.generation ||
+                    !a.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return@post
                 if (ok) probeDelay = 15_000L else probeDelay = (probeDelay * 2).coerceAtMost(120_000L)
                 val checkedAt = android.os.SystemClock.elapsedRealtime()
                 nextProbeAt = checkedAt + probeDelay
