@@ -47,6 +47,10 @@ class ShellHost(private val a: MainActivity) : McHostApi {
     private var pausedAt = 0L
     private var lastRestartAt = 0L
     private var destroyed = false
+    private var pendingSearch: String? = null
+    private var searchGeneration = 0L
+    private var searchInFlight = false
+    private var searchExpiresAt = 0L
     override var shown = true
         private set
 
@@ -87,6 +91,7 @@ class ShellHost(private val a: MainActivity) : McHostApi {
     private val shellClient = object : WebViewClient() {
         override fun onPageFinished(view: WebView?, url: String?) {
             if (destroyed || view == null || view !== web) return
+            flushSearch()
             val id = wakeAttempt
             if (id != null && !wakeAckSent) {
                 val q = org.json.JSONObject.quote(id)
@@ -202,7 +207,32 @@ class ShellHost(private val a: MainActivity) : McHostApi {
         }
     }
 
-    override fun onHome() { show(); js("window.__mc && window.__mc.home && window.__mc.home()") }
+    override fun onHome() { pendingSearch = null; searchGeneration++; show(); js("window.__mc && window.__mc.home && window.__mc.home()") }
+
+    override fun search(query: String) {
+        android.util.Log.i("MediaCenter", "launcher_search_queued chars=${query.length}")
+        searchGeneration++
+        pendingSearch = query
+        searchExpiresAt = android.os.SystemClock.elapsedRealtime() + 20_000
+        show()
+        ui.post { flushSearch() }
+    }
+
+    private fun flushSearch() {
+        val query = pendingSearch ?: return
+        if (destroyed || !this::web.isInitialized || searchInFlight) return
+        if (android.os.SystemClock.elapsedRealtime() > searchExpiresAt) { pendingSearch = null; return }
+        val generation = searchGeneration
+        val encoded = JSONObject.quote(query)
+        searchInFlight = true
+        web.evaluateJavascript("(function(){if(!window.__mc||!window.__mc.search)return false;window.__mc.search($encoded);return true;})()") { opened ->
+            if (opened == "true") android.util.Log.i("MediaCenter", "launcher_search_opened")
+            searchInFlight = false
+            if (destroyed) return@evaluateJavascript
+            if (opened == "true" && generation == searchGeneration) pendingSearch = null
+            if (pendingSearch != null) ui.postDelayed({ flushSearch() }, 100)
+        }
+    }
 
     // A recovery decision belongs to the current document and a fresh health
     // response, never to a cached success from before the profile/server change.
@@ -279,7 +309,7 @@ class ShellHost(private val a: MainActivity) : McHostApi {
         }
     }
 
-    override fun back() { a.mcCancelNavigation();js("window.__mc && window.__mc.back && window.__mc.back()") }
+    override fun back() { pendingSearch = null; searchGeneration++; a.mcCancelNavigation();js("window.__mc && window.__mc.back && window.__mc.back()") }
 
     override fun dispatchKey(event: KeyEvent): Boolean = web.dispatchKeyEvent(event)
 

@@ -17,6 +17,10 @@
             android:launchMode="singleTask"
             tools:replace="android:launchMode">
             <intent-filter>
+                <action android:name="app.lampac.home.action.LAUNCHER_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />

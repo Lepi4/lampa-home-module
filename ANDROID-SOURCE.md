@@ -18,24 +18,26 @@ Android-клиент основан на [lampa-app/LAMPA](https://github.com/la
 
 ## Сборка опубликованной версии
 
-В репозитории находится APK `release/2026.11.12.3/LMPC-1.16.41-1159.apk`. Для сборки этой версии используйте JDK 17 и Android SDK Platform 34. Gradle и зависимости загружаются из репозиториев, указанных в проекте; нужен доступ в интернет.
+В репозитории находится APK `release/2026.11.14.2/LMPC-1.16.44-1162.apk`. Для сборки этой версии используйте JDK 17 и Android SDK Platform 34. Gradle и зависимости загружаются из репозиториев, указанных в проекте; нужен доступ в интернет.
 
 Linux/macOS:
 
 ```bash
 cd LAMPA
-bash gradlew assembleMcRelease -PappVersionCode=1159 -PappVersionName=1.16.41
+bash gradlew assembleMcRelease -PappVersionCode=1162 -PappVersionName=1.16.44
 ```
 
 Windows PowerShell:
 
 ```powershell
 cd LAMPA
-.\gradlew.bat assembleMcRelease -PappVersionCode=1159 -PappVersionName=1.16.41
+.\gradlew.bat assembleMcRelease '-PappVersionCode=1162' '-PappVersionName=1.16.44'
 ```
 
 Результат находится в `LAMPA/app/build/outputs/apk/mc/release/`. Для варианта mc используется идентификатор приложения `app.lampac.home.mc`.
 
 Приватный ключ подписи и пароли в репозиторий не включены. Для собственной подписанной сборки задайте свои параметры через `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `RELEASE_SIGN_KEY_ALIAS`, `RELEASE_SIGN_KEY_PASSWORD` либо локальный файл `app/keystore/keystore_config`, который не следует публиковать. Без ключа издателя нельзя получить его подпись или заменить установленное им приложение обычным обновлением.
 
-Публикация исходников не является утверждением о побайтовой воспроизводимости APK: подпись, зависимости и окружение сборки могут различаться. В рамках обновления этой документации повторная сборка APK не выполнялась.
+Выпуск 1162 собран задачей `assembleMcRelease` с проверкой `lintVital`. Подпись соответствует предыдущему выпуску. Холодный и повторный запросы поиска лаунчера, а также обычный поиск Lampa проверены на Android TV 11. Подробности интеграции: [поиск в лаунчере с пульта](docs/LAUNCHER-VOICE-SEARCH.md).
+
+Публикация исходников не означает побайтовую воспроизводимость APK: подпись, зависимости и окружение сборки могут различаться.
