@@ -378,7 +378,8 @@ class MainActivity : BaseActivity(),
         instance = java.lang.ref.WeakReference(this)
         // Система может уничтожить остановленное окно, пока играет плеер («low-mem»): по возврату оно создаётся заново с пустой страницей.
         // Не повторяем старую команду запуска (карточка/поиск), а возвращаем то, что было на экране.
-        val mcRecreated = BuildConfig.APPLICATION_ID.endsWith(".mc") && savedInstanceState != null
+        val mcRecreated = BuildConfig.APPLICATION_ID.endsWith(".mc") && savedInstanceState != null && mcLauncherSearchQuery(intent) == null
+        if (mcLauncherSearchQuery(intent) != null) Log.i(TAG, "launcher_search_create saved=${savedInstanceState != null}")
         if (mcRecreated) {
             intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
             mcRestoreLast = mcShellHidden && !mcReturnToShell
@@ -392,7 +393,8 @@ class MainActivity : BaseActivity(),
         if (BuildConfig.APPLICATION_ID.endsWith(".mc")) {
             try {
                 mcHost = Class.forName("top.rootu.lampa.shell.ShellHost").getConstructor(MainActivity::class.java).newInstance(this) as McHostApi
-                mcHost?.attach(if (mcRecreated) (mcShellHidden && !mcReturnToShell) else !mcIsHomeIntent(intent))
+                mcHost?.attach(if (mcLauncherSearchQuery(intent) != null) false else if (mcRecreated) (mcShellHidden && !mcReturnToShell) else !mcIsHomeIntent(intent))
+                mcLauncherSearchQuery(intent)?.let { mcHost?.search(it) }
             } catch (e: Exception) { Log.e(TAG, "оболочка Media Center не создана", e) }
         }
 
@@ -429,6 +431,11 @@ class MainActivity : BaseActivity(),
     }
 
     // вход «домой»/«из меню приложений» без команды: показываем оболочку; всё остальное (карточка, поиск, ТВ) открывается в Lampa
+    private fun mcLauncherSearchQuery(i: Intent?): String? {
+        if (!BuildConfig.APPLICATION_ID.endsWith(".mc") || i?.action != "app.lampac.home.action.LAUNCHER_SEARCH") return null
+        return i.getStringExtra(SearchManager.QUERY)?.trim()?.take(500)?.takeIf { it.isNotEmpty() }
+    }
+
     private fun mcIsHomeIntent(i: Intent?): Boolean {
         if (i == null) return true
         if (i.action != Intent.ACTION_MAIN) return false
@@ -502,6 +509,12 @@ class MainActivity : BaseActivity(),
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         mcHost?.let { h ->
+            mcLauncherSearchQuery(intent)?.let { query ->
+                setIntent(intent)
+                mcCancelNavigation()
+                h.search(query)
+                return
+            }
             if (mcIsHomeIntent(intent)) { mcCancelNavigation();h.onHome(); return }
             // «ТВ»: оболочка остаётся на экране, пока страница включает эфир (после выхода из эфира вы снова на ней, а не на главной Lampa)
             else if (TvLaunch.channel >= 0 || intent.getBooleanExtra("mc_hold_shell",false) || intent.getBooleanExtra("mc_keep_shell",false)) h.show() else h.hide()
@@ -1646,6 +1659,8 @@ class MainActivity : BaseActivity(),
         // Log intent data for debugging
         debugLogIntentData(TAG, intent)
         intent ?: return
+        // Launcher search is handled by the shell, including before its WebView finishes loading.
+        if (BuildConfig.APPLICATION_ID.endsWith(".mc") && intent.action == "app.lampac.home.action.LAUNCHER_SEARCH") return
         if(BuildConfig.APPLICATION_ID.endsWith(".mc")&&ProfileRuntime.enabled()&&!trustedHomeNavigation){
             val scope=ProfileRuntime.snapshot()
             val personalLink=intent.data!=null||intent.getBooleanExtra("continueWatch",false)||intent.hasExtra("media")

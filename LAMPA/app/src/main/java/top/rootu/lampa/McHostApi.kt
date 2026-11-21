@@ -13,6 +13,7 @@ interface McHostApi {
     fun show()
     fun hide()
     fun onHome()
+    fun search(query: String)
     fun onResume()
     fun noteWake(awaySec: Long) {}
     fun onPause()

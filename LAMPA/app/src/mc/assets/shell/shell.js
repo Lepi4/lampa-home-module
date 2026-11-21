@@ -1659,6 +1659,7 @@
   }
 
   window.__mc = {
+    search: function (query) { if (state.searchOpen) closeSearch(); openSearch(String(query || '')); },
     profileRefreshed:function(next,generation){if(generation===userGeneration)applyUserPolicy(next);},
     home: function () { if (state.setupOpen) return; state.nav.forEach(function (n) { if (n.strip) n.strip.scrollLeft = 0; }); setFocus(state.nav.length > 1 ? 1 : 0, 0); $('scroll').scrollTop = 0; },
     resume: function (away) {
