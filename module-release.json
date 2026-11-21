@@ -11,7 +11,7 @@
   "install": "deploy/deploy-module.py",
   "package": "release/2026.11.21.1/homemedia.tar.gz",
   "schema": 1,
-  "artifact_ref": "0000000000000000000000000000000000000000",
+  "artifact_ref": "2dd9d2dcf305d857b0cd882fb83b0c615ba2e756",
   "published_utc": "2026-11-21T16:57:32.434385+00:00",
   "components": {
     "homemedia": {
