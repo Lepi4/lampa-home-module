@@ -144,17 +144,53 @@
     return r;
   }
 
-  function play(d, s, idx) {
+  // Та же озвучка и тот же источник по сезонам. Сезон 0 остаётся отдельно.
+  function voiceLine(d, s) {
+    var own = (s.episodes || []).slice().sort(function (a, b) { return a.n - b.n; }).map(function (e) { return { source: s, episode: e }; });
+    if (d.media !== 'tv' || !(s.season > 0)) return own;
+    var key = s.vkey || normV(s.voice);
+    var chosen = {};
+    (d.sources || []).forEach(function (x) {
+      if (!(x.season > 0) || x.source !== s.source) return;
+      if ((x.vkey || normV(x.voice)) !== key) return;
+      if (!chosen[x.season] || x.release === s.release) chosen[x.season] = x;
+    });
+    chosen[s.season] = s;
+    var rows = [];
+    Object.keys(chosen).map(Number).sort(function (a, b) { return a - b; }).forEach(function (season) {
+      (chosen[season].episodes || []).slice().sort(function (a, b) { return a.n - b.n; }).forEach(function (e) {
+        rows.push({ source: chosen[season], episode: e });
+      });
+    });
+    return rows.length ? rows : own;
+  }
+
+  function play(d, s, idx, restart) {
     var mh = 0;
     try { mh = parseInt(localStorage.getItem('home_maxh_v1'), 10) || 0; } catch (x) {}
-    var playlist = s.episodes.map(function (e) {
+    var wanted = (s.episodes || [])[idx];
+    if (!wanted) return noty('Аниме: серия не найдена');
+    var rows = voiceLine(d, s);
+    var at = -1;
+    rows.forEach(function (r, i) { if (at < 0 && r.episode === wanted) at = i; });
+    if (at < 0) { rows = [{ source: s, episode: wanted }]; at = 0; }
+    var from = Math.max(0, at - 10), to = Math.min(rows.length, at + 90);
+    var playlist = [], start = -1;
+    rows.slice(from, to).forEach(function (row) {
+      var e = row.episode, src = row.source;
+      if (!e.url) return;
       var u = e.url;
       if (u.charAt(0) === '/') u = BASE + u + (mh > 0 ? '&h=' + mh : '');      // поток AnimeLib выбирается сервером по профилю устройства
-      return { title: epLabel(d, s, e), url: u, timeline: Lampa.Timeline.view(e.hash), hs: { src: 'anime', release: s.release, season: s.season, ep: e.n, voice: s.voice || '', q: /2160/.test(s.quality || '') ? '4K' : /1080/.test(s.quality || '') ? 'FHD' : /720/.test(s.quality || '') ? 'HD' : '' } };
+      var q = src.quality || '';
+      var entry = { title: epLabel(d, src, e), url: u, season: src.season, episode: e.n, timeline: Lampa.Timeline.view(e.hash), hs: { src: 'anime', release: src.release, season: src.season, ep: e.n, voice: src.voice || '', q: /2160/.test(q) ? '4K' : /1080/.test(q) ? 'FHD' : /720/.test(q) ? 'HD' : '' } };
+      if (restart && e === wanted) entry.home_start_mode = 'restart';
+      playlist.push(entry);
+      if (e === wanted) start = playlist.length - 1;
     });
+    if (start < 0) return noty('Аниме: нет доступного потока');
     window.__apKey = d.card;               // карточка тайтла: отметка просмотра уходит на сервер вместе с ней
     window.__apKeyAt = Date.now();
-    var cur = $.extend({}, playlist[idx]);
+    var cur = $.extend({}, playlist[start]);
     cur.playlist = playlist;
     // A popup may be above another title. Its activity is not playback identity.
     var active = Lampa.Activity.active() || {}, visibleCard = active.card || active.movie;
@@ -165,12 +201,11 @@
     cur.home_base = BASE;
     cur.audio_key = d.card;
     cur.tl_meta = JSON.stringify(playlist.map(function (p) {
-      return { id: d.media === 'tv' ? 'tv-' + d.tmdb + '-s' + s.season + 'e' + p.hs.ep : 'movie-' + d.tmdb,
+      return { id: d.media === 'tv' ? 'tv-' + d.tmdb + '-s' + p.hs.season + 'e' + p.hs.ep : 'movie-' + d.tmdb,
         h: String(p.timeline.hash), c: d.card };
     }));
-    var e = s.episodes[idx];
     api('/anime/last/set?card=' + encodeURIComponent(d.card) + '&source=' + encodeURIComponent(s.source) + '&voice=' + encodeURIComponent(s.voice || '') +
-      '&season=' + s.season + '&ep=' + e.n, function () {});
+      '&season=' + s.season + '&ep=' + wanted.n, function () {});
     Lampa.Player.play(cur);
     Lampa.Player.playlist(playlist);
   }
@@ -216,30 +251,40 @@
       return { title: mk + epLabel(d, s, e), subtitle: sub, idx: i, selected: sel };
     });
     showSelect(sourceTitle(d, s) + ' · ' + (s.quality || '1080p'), items, back, function (a) {
+      var e = s.episodes[a.idx];
+      if (e.state === 'watched') return askAnimeStart(d, s, a.idx, prev, back);
       Lampa.Controller.toggle(prev);
-      play(d, s, a.idx);
+      play(d, s, a.idx, false);
     }, function (a) {
       var e = s.episodes[a.idx];
       var done = e.state === 'watched';
-      Lampa.Select.close();
       function reopen() { showEpisodes(d, s, prev, e.n, back); }
-      setTimeout(function () {
-        var busy = false;
-        Lampa.Select.show({ title: epLabel(d,s,e), items:[{title:done?'Снять отметку просмотра':'Отметить просмотренным'}],
-          onBack:reopen,onBeforeClose:function(){return !busy;},onSelect:function(){
-            if(busy)return;busy=true;
-            if(!window.HomeEpisodeMark){noty('Синхронизация ещё загружается');busy=false;reopen();return;}
-            var duration=e.dur||Lampa.Timeline.view(e.hash).duration||1500;
-            window.HomeEpisodeMark({id:d.media==='tv'?'tv-'+d.tmdb+'-s'+s.season+'e'+e.n:'movie-'+d.tmdb,
-              hash:String(e.hash),card:d.card,position:done?0:duration,duration:duration,percent:done?0:100,
-              watched_at:Date.now(),op:done?'reset':'completed'},function(confirmed){
-                busy=false;
-                if(confirmed){e.state=done?'':'watched';e.t=done?0:duration;}
-                noty(confirmed?(done?'Отметка снята':'Отмечено просмотренным'):'Отметка ожидает синхронизации');
-                reopen();
-              });
-          }});
-      },200);
+      var busy = false;
+      Lampa.Select.hide();
+      Lampa.Select.show({ title: epLabel(d,s,e), items:[{title:done?'Снять отметку просмотра':'Отметить просмотренным'}],
+        onBack:reopen,onBeforeClose:function(){return !busy;},onSelect:function(){
+          if(busy)return;busy=true;
+          if(!window.HomeEpisodeMark){noty('Синхронизация ещё загружается');busy=false;reopen();return;}
+          var duration=e.dur||Lampa.Timeline.view(e.hash).duration||1500;
+          window.HomeEpisodeMark({id:d.media==='tv'?'tv-'+d.tmdb+'-s'+s.season+'e'+e.n:'movie-'+d.tmdb,
+            hash:String(e.hash),card:d.card,position:done?0:duration,duration:duration,percent:done?0:100,
+            watched_at:Date.now(),op:done?'reset':'completed'},function(confirmed){
+              busy=false;
+              if(confirmed){e.state=done?'':'watched';e.t=done?0:duration;}
+              noty(confirmed?(done?'Отметка снята':'Отмечено просмотренным'):'Отметка ожидает синхронизации');
+              reopen();
+            });
+        }});
+    });
+  }
+
+  function askAnimeStart(d, s, idx, prev, back) {
+    var e = s.episodes[idx];
+    Lampa.Select.show({
+      title: epLabel(d, s, e),
+      items: [{ title: 'С начала', restart: true }, { title: 'С сохранённого места', restart: false }],
+      onBack: function () { showEpisodes(d, s, prev, e.n, back); },
+      onSelect: function (a) { Lampa.Controller.toggle(prev); play(d, s, idx, !!a.restart); }
     });
   }
 

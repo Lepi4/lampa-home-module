@@ -985,6 +985,8 @@
             if(row&&row.id&&row.id!==target.id)return fail('Получена позиция другой серии');
             if(row)tl={hash:String(target.h),time:row.t||0,duration:row.d||0,percent:row.p||0,updated:row.u,received:true};
             else tl={hash:String(target.h),time:old.time||0,duration:old.duration||0,percent:old.percent||0,updated:old.updated||0,received:true};
+            // «С начала» обнуляет только этот запуск. Серверная отметка остаётся, пока плеер не пришлёт новый прогресс.
+            if(data.home_start_mode==='restart')tl=$.extend({},tl,{time:0,percent:0});
             data.timeline=tl;
             if(data.playlist&&data.playlist[index])data.playlist[index].timeline=tl;
             data.home_clock_ms=result.now;

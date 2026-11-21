@@ -550,10 +550,11 @@
       if (r.pushed === r.time) return;
       r.pushed = r.time;
       var pct = r.percent || (r.duration ? r.time / r.duration * 100 : 0);
+      var sn = r.kp && r.kp.season ? r.kp.season : 0;
       rows.push({
-        id: posState.season ? 'tv-' + posState.tmdb + '-s' + posState.season + 'e' + r.kp.video : 'movie-' + posState.tmdb,
+        id: sn ? 'tv-' + posState.tmdb + '-s' + sn + 'e' + r.kp.video : 'movie-' + posState.tmdb,
         hash: h,
-        card: posState.tmdb + '_' + (posState.season ? 'tv' : 'movie'),
+        card: posState.tmdb + '_' + (sn ? 'tv' : 'movie'),
         position: r.time,
         duration: r.duration,
         percent: Math.round(pct * 10) / 10,
@@ -699,18 +700,39 @@
     return Lampa.Utils.hash(season ? [season, season > 10 ? ':' : '', v.number, orig].join('') : orig);
   }
 
-  function playList(item, season, list, index) {
+  // Окно запуска: 10 серий назад и 89 вперёд, не больше 100. Плеер получает уже обрезанный список.
+  function aroundPlay(list, index) {
+    if (index < 0 || !list || !list.length) return { items: [], index: 0 };
+    var from = Math.max(0, index - 10), to = Math.min(list.length, index + 90);
+    return { items: list.slice(from, to), index: index - from };
+  }
+
+  // Обычные сезоны по порядку. Сезон 0 сюда не входит: спецвыпуски не встают между сезонами.
+  function seriesRows(item) {
+    var rows = [];
+    (item.seasons || []).slice().sort(function (a, b) { return a.number - b.number; }).forEach(function (s) {
+      if (!(s.number > 0)) return;
+      var count = (s.episodes || []).length;
+      (s.episodes || []).slice().sort(function (a, b) { return a.number - b.number; }).forEach(function (e) {
+        rows.push({ season: s.number, episode: e, count: count });
+      });
+    });
+    return rows;
+  }
+
+  function playRows(item, rows, wanted, restart) {
     var prev = baseCtrl();
-    // ключ тайтла для памяти звуковой дорожки (общая для серий сериала)
-    try { window.__apKey = (currentCard && currentCard.id) ? currentCard.id + '_' + (season ? 'tv' : 'movie') : 'kp' + item.id; window.__apKeyAt = Date.now(); } catch (x) {}
+    var seasonKey = wanted && wanted.season;
+    try { window.__apKey = (currentCard && currentCard.id) ? currentCard.id + '_' + (seasonKey ? 'tv' : 'movie') : 'kp' + item.id; window.__apKeyAt = Date.now(); } catch (x) {}
     devLoad(function () {
       var title = splitTitle(item.title).ru;
-      var playlist = [];
-      list.forEach(function (v) {
+      var playlist = [], start = -1;
+      rows.forEach(function (row) {
+        var v = row.episode, season = row.season;
         var url = pickUrl(v.files);
         if (!url) return;
         var qLab = /2160|4k/i.test(lastPickQ) ? '4K' : /1080/.test(lastPickQ) ? 'FHD' : /720/.test(lastPickQ) ? 'HD' : /\d/.test(lastPickQ) ? 'SD' : '';
-        var hash = nativeHash(item, season, v, list.length);
+        var hash = nativeHash(item, season, v, row.count);
         var tl = Lampa.Timeline.view(hash);
         var w = v.watching || {};
         if (!window.HomeUser && !tl.time && w.time && w.status !== 1 && v.duration) {
@@ -720,22 +742,45 @@
           try { Lampa.Timeline.update(tl); } catch (e) {}
         }
         var name = season ? title + ' · S' + season + 'E' + v.number + (v.title ? ' · ' + splitTitle(v.title).ru : '') : (v.title ? title + ' · ' + v.title : title);
-        playlist.push({ title: name, url: url, timeline: tl, hls_type: 'hlsjs', kp: { item: item.id, season: season, video: v.number, hash: hash, native: hasNativeKey(item, season, list.length) }, hs: { src: 'kinopub', item: item.id, season: season || 0, ep: v.number, q: qLab } });
+        var entry = { title: name, url: url, timeline: tl, hls_type: 'hlsjs', kp: { item: item.id, season: season, video: v.number, hash: hash, native: hasNativeKey(item, season, row.count) }, hs: { src: 'kinopub', item: item.id, season: season || 0, ep: v.number, q: qLab } };
+        if (restart && row === wanted) entry.home_start_mode = 'restart';
+        playlist.push(entry);
+        if (row === wanted) start = playlist.length - 1;
       });
-      if (!playlist.length) return Lampa.Noty.show('Кинопаб: нет доступного потока');
-
-      var start = Math.min(index, playlist.length - 1);
+      if (start < 0) return Lampa.Noty.show('Кинопаб: нет доступного потока');
       hookHls();
       startPlay(playlist, start);
-
-      startPositionPush(item, season, playlist);
-
+      startPositionPush(item, playlist[start].kp.season, playlist);
       Lampa.Player.callback(function () {
         stopPositionPush(!nativeOwnsProgress());
         if (!nativeOwnsProgress()) { var cur = playlist[start]; if (cur) report(cur.kp.item, cur.kp.season, cur.kp.video, cur.kp.hash); }
         Lampa.Controller.toggle(prev);
       });
     });
+  }
+
+  function playList(item, season, list, index, restart) {
+    var rows = (list || []).map(function (v) { return { season: season, episode: v, count: list.length }; });
+    var at = rows.length ? Math.max(0, Math.min(index || 0, rows.length - 1)) : -1;
+    var win = aroundPlay(rows, at);
+    playRows(item, win.items, at < 0 ? null : rows[at], restart);
+  }
+
+  // Сериалы и мультсериалы Кинопаба: один порядок через границу сезона, в плеер уходит окно вокруг выбранной серии.
+  function playSeries(item, seasonNumber, episodeNumber, restart) {
+    var rows = seriesRows(item);
+    var at = -1;
+    rows.forEach(function (r, i) { if (at < 0 && r.season === seasonNumber && r.episode.number === episodeNumber) at = i; });
+    if (at < 0) {
+      var season = null;
+      (item.seasons || []).forEach(function (s) { if (s.number === seasonNumber) season = s; });
+      if (!season) return Lampa.Noty.show('Кинопаб: серия не найдена');
+      var idx = 0;
+      (season.episodes || []).forEach(function (e, i) { if (e.number === episodeNumber) idx = i; });
+      return playList(item, seasonNumber, season.episodes || [], idx, restart);
+    }
+    var win = aroundPlay(rows, at);
+    playRows(item, win.items, rows[at], restart);
   }
 
   // «Продолжить» из карточки (continue.js): та же серия или следующая, если эта досмотрена
@@ -778,7 +823,10 @@
               if (si >= seasons.length) return fail('следующей серии нет');
             }
           }
-          season = seasons[si].number; list = seasons[si].episodes; idx = ei;
+          var ep = seasons[si].episodes[ei];
+          if (!ep || !pickUrl(ep.files)) return fail('нет доступного потока');
+          playSeries(item, seasons[si].number, ep.number, false);
+          return ok();
         } else {
           list = item.videos || [];
           if (rec.ep != null) list.forEach(function (v, i) { if (v.number === rec.ep) idx = i; });
@@ -880,21 +928,29 @@
         if (s) openEpisodes(it, s, prev); else openItem({ kp_id: item.id });
       }, function () { Lampa.Controller.toggle(prev); });
     };
-    Lampa.Select.close();
-    setTimeout(function () {
-      Lampa.Select.show({
-        title: e.number + '. ' + splitTitle(e.title).ru,
-        items: [{ title: done ? 'Снять отметку просмотра' : 'Отметить просмотренным', act: 'toggle' }],
-        onBack: reopen,
-        onSelect: function () {
-          setEpisode(item, season, e, done ? 0 : 1, function (confirmed) {
-            if(!confirmed){Lampa.Noty.show('Отметка ожидает синхронизации');reopen();return;}
-            Lampa.Noty.show(done ? 'Отметка снята' : 'Отмечено как просмотренное');
-            setTimeout(reopen, 200);
-          });
-        }
-      });
-    }, 200);
+    // hide не вызывает onBack списка серий, иначе загрузка сезонов затирает это меню.
+    Lampa.Select.hide();
+    Lampa.Select.show({
+      title: e.number + '. ' + splitTitle(e.title).ru,
+      items: [{ title: done ? 'Снять отметку просмотра' : 'Отметить просмотренным', act: 'toggle' }],
+      onBack: reopen,
+      onSelect: function () {
+        setEpisode(item, season, e, done ? 0 : 1, function (confirmed) {
+          if(!confirmed){Lampa.Noty.show('Отметка ожидает синхронизации');reopen();return;}
+          Lampa.Noty.show(done ? 'Отметка снята' : 'Отмечено как просмотренное');
+          setTimeout(reopen, 200);
+        });
+      }
+    });
+  }
+
+  function chooseStart(item, season, e, prev) {
+    Lampa.Select.show({
+      title: e.number + '. ' + splitTitle(e.title).ru,
+      items: [{ title: 'С начала', restart: true }, { title: 'С сохранённого места', restart: false }],
+      onBack: function () { openEpisodes(item, season, prev); },
+      onSelect: function (a) { playSeries(item, season.number, e.number, !!a.restart); }
+    });
   }
 
   function seasonMenu(item, season, prev, card) {
@@ -935,7 +991,11 @@
         return { title: mk + e.number + '. ' + splitTitle(e.title).ru, subtitle: sub, idx: i, selected: (first ? i === first - 1 : i === 0) };
       }),
       onBack: function () { openItem({ kp_id: item.id }); },
-      onSelect: function (a) { playList(item, season.number, season.episodes, a.idx); },
+      onSelect: function (a) {
+        var e = season.episodes[a.idx];
+        if (epDone(item, season, e)) chooseStart(item, season, e, prev);
+        else playSeries(item, season.number, e.number, false);
+      },
       onLong: function (a) { episodeMenu(item, season, a.idx, prev); }
     });
   }
